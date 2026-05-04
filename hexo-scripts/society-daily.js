@@ -11,6 +11,7 @@ const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined;
 const client = new Anthropic({
   apiKey: process.env.AUTH_TOKEN,
   baseURL: process.env.BASE_URL,
+  timeout: 180000, // 3分钟超时
 });
 
 const parser = new RSSParser({
