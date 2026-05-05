@@ -1,4 +1,4 @@
-const Anthropic = require('@anthropic-ai/sdk');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const RSSParser = require('rss-parser');
 const fs = require('fs');
@@ -8,11 +8,8 @@ const path = require('path');
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
 const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined;
 
-const client = new Anthropic({
-  apiKey: process.env.AUTH_TOKEN,
-  baseURL: process.env.BASE_URL,
-  timeout: 180000, // 3分钟超时
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || 'gemini-2.5-flash' });
 
 const parser = new RSSParser({
   requestOptions: proxyAgent ? { agent: proxyAgent } : {},
@@ -133,14 +130,8 @@ ${newsText}
 8. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成社会思想日报...');
-  const response = await client.messages.create({
-    model: process.env.MODEL,
-    max_tokens: 4000,
-    messages: [{ role: 'user', content: prompt }],
-  });
-
-  const textBlock = response.content.find(c => c.type === 'text');
-  return textBlock ? textBlock.text.trim() : '';
+  const result = await model.generateContent(prompt);
+  return result.response.text().trim() || '';
 }
 
 // ============ 发布到Hexo ============

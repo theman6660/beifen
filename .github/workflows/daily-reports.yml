@@ -31,9 +31,8 @@ jobs:
 
       - name: Generate AI Daily Report
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-          MODEL: ${{ secrets.MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: node hexo-scripts/ai-daily.js
         timeout-minutes: 5
 
@@ -76,9 +75,8 @@ jobs:
 
       - name: Generate Society Daily Report
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-          MODEL: ${{ secrets.MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
         run: node hexo-scripts/society-daily.js
         timeout-minutes: 5
@@ -122,18 +120,16 @@ jobs:
 
       - name: Generate AI Daily Report
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-          MODEL: ${{ secrets.MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: node hexo-scripts/ai-daily.js
         continue-on-error: true
         timeout-minutes: 5
 
       - name: Generate Society Daily Report
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
-          BASE_URL: ${{ secrets.BASE_URL }}
-          MODEL: ${{ secrets.MODEL }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
         run: node hexo-scripts/society-daily.js
         continue-on-error: true
