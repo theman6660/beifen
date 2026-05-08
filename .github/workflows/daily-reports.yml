@@ -34,7 +34,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: node hexo-scripts/ai-daily.js
-        timeout-minutes: 5
+        timeout-minutes: 10
 
       - name: Commit and deploy
         run: |
@@ -80,7 +80,7 @@ jobs:
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
         run: node hexo-scripts/society-daily.js
-        timeout-minutes: 5
+        timeout-minutes: 10
 
       - name: Commit and deploy
         run: |
@@ -126,7 +126,7 @@ jobs:
           GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
         run: node hexo-scripts/ai-daily.js
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 10
 
       - name: Generate Society Daily Report
         env:
@@ -135,7 +135,7 @@ jobs:
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
         run: node hexo-scripts/society-daily.js
         continue-on-error: true
-        timeout-minutes: 5
+        timeout-minutes: 10
 
       - name: Commit and deploy
         run: |
