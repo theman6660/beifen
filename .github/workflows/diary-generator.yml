@@ -34,7 +34,11 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add source/_posts/diary-*.md data/snippets/
+          # 只在有diary文件时才add
+          if ls source/_posts/diary-*.md 1>/dev/null 2>&1; then
+            git add source/_posts/diary-*.md
+          fi
+          git add data/snippets/ 2>/dev/null || true
           git diff --staged --quiet || git commit -m "docs: 日记 $(date +%Y-%m-%d)"
           git pull --rebase
           git push
