@@ -32,6 +32,7 @@ jobs:
 
       - name: Commit and deploy
         run: |
+          npm ci
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 只在有diary文件时才add
