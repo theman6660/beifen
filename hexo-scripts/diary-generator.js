@@ -42,24 +42,23 @@ async function generateDiary(snippets, dateStr) {
     `[${s.time}] ${s.reply}`
   ).join('\n');
 
-  const prompt = `你是一个日记写手。下面是一天中记录下来的碎片信息，请把它们写成一篇自然的第一人称日记。
+  const prompt = `根据以下事件碎片，写一篇简洁的日记，纯记录事件，不要任何主观感受。
 
 日期：${dateCN} ${dayOfWeek}
 
-今日碎片（这些是日记主人一天中的只言片语，记录了他在做什么、想什么）：
+事件碎片：
 ${snippetsText}
 
-写作要求：
-- 你就是写日记的人，用第一人称"我"写
-- 不要太长，200-400字
-- 语言轻松自然，像自己晚上坐下来回顾今天
-- 可以补充合理的心理活动和细节，让日记更完整
-- 碎片只是线索，重新组织成连贯叙事，不要逐条罗列
-- 碎片之间如果有联系，自然地串联
-- 日记就是日记，不要提"碎片"、"记录"、"收集"这些词
-- 纯文字，不用markdown
+写作规则：
+- 用第一人称"我"
+- 只记录做了什么、发生了什么，不写心情、感想、评价
+- 不要心理活动（如"心里还是挺有成就感的"）
+- 不要主观形容词（如"好吃"、"累死了"、"还不错"）
+- 不要抒情和感慨
+- 碎片之间自然串联，保持时间顺序
+- 100-200字即可，简洁
 
-直接写日记内容，不要加标题。`;
+直接写日记，不要标题。`;
 
   console.log('[DeepSeek] 正在生成日记...');
   const response = await client.chat.completions.create({
@@ -67,7 +66,7 @@ ${snippetsText}
     messages: [
       { role: 'user', content: prompt },
     ],
-    temperature: 0.8,
+    temperature: 0.3,
     max_tokens: 1500,
   });
 
