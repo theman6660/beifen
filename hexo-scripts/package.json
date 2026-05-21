@@ -10,6 +10,7 @@
   "dependencies": {
     "@google/generative-ai": "^0.21.0",
     "https-proxy-agent": "^9.0.0",
+    "openai": "^4.104.0",
     "rss-parser": "^3.13.0"
   }
 }
