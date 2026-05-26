@@ -2,49 +2,68 @@ name: Daily Report Pipeline
 
 on:
   schedule:
-    # 北京时间每天早上 8:00 (UTC+8 = 00:00 UTC)
-    - cron: '0 0 * * *'
+    - cron: '0 0 * * *'  # 北京时间 8:00
   workflow_dispatch:
 
 jobs:
-  generate:
+  ai-daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install hexo dependencies
-        run: npm ci
-
-      - name: Install report script dependencies
-        run: |
-          cd scripts
-          npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
-
-      - name: Run AI Daily Report
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: cd scripts && npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
+      - name: Generate AI Daily
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
         run: node scripts/ai-daily.js --no-deploy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-posts
+          path: source/_posts/ai-daily-*.md
 
-      - name: Run Society Daily Report
+  society-daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - run: cd scripts && npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
+      - name: Generate Society Daily
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
         run: node scripts/society-daily.js --no-deploy
+      - uses: actions/upload-artifact@v4
+        with:
+          name: society-posts
+          path: source/_posts/society-daily-*.md
 
-      - name: Build & Deploy
+  deploy:
+    needs: [ai-daily, society-daily]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'npm' }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with: { name: ai-posts, path: source/_posts/ }
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with: { name: society-posts, path: source/_posts/ }
+        continue-on-error: true
+      - name: Deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
