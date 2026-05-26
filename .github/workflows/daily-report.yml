@@ -46,9 +46,15 @@ jobs:
 
       - name: Deploy to GitHub Pages
         env:
-          GIT_USER: ${{ secrets.GIT_USER || 'theman6660' }}
-          GIT_EMAIL: ${{ secrets.GIT_EMAIL || 'theman6660@users.noreply.github.com' }}
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
-          git config --global user.name "$GIT_USER"
-          git config --global user.email "$GIT_EMAIL"
+          git config --global user.name "theman6660"
+          git config --global user.email "theman6660@users.noreply.github.com"
+          # 用 token 鉴权替换 deploy repo URL
+          node -e "
+            const fs=require('fs'),yml=fs.readFileSync('_config.yml','utf8');
+            const token=process.env.DEPLOY_TOKEN;
+            const updated=yml.replace(/repo:\s*https:\/\/github\.com/g,'repo: https://x-access-token:'+token+'@github.com');
+            fs.writeFileSync('_config.yml',updated);
+          "
           npx hexo deploy
