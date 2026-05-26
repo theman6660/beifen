@@ -250,7 +250,7 @@ ${newsText}
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStr) {
+function publishToHexo(report, dateStr, noDeploy = false) {
   const fileName = `ai-daily-${dateStr}.md`;
   const filePath = path.join(HEXO_DIR, 'source', '_posts', fileName);
 
@@ -266,29 +266,15 @@ ${report}
 
   fs.writeFileSync(filePath, hexoContent, 'utf-8');
   console.log(`[发布] 已生成: ${fileName}`);
-
-  // 部署到Hexo
-  try {
-    console.log('[部署] 正在生成和部署...');
-    execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
-      cwd: HEXO_DIR,
-      env: {
-        ...process.env,
-        HTTP_PROXY: PROXY_URL,
-        HTTPS_PROXY: PROXY_URL,
-      },
-      stdio: 'inherit',
-    });
-    console.log('[部署] 完成！');
-  } catch (err) {
-    console.error('[部署] 失败:', err.message);
-  }
+  if (noDeploy) return;
 }
 
 // ============ 主流程 ============
 async function main() {
+  const noDeploy = process.argv.includes('--no-deploy');
   console.log('========================================');
   console.log('  AI行业日报生成器');
+  if (noDeploy) console.log('  (仅生成，不部署)');
   console.log('========================================\n');
 
   const today = new Date();
@@ -309,29 +295,31 @@ async function main() {
   console.log('[步骤2] 生成行业报告...\n');
   const report = await generateReport(newsItems);
 
-  // 3. 发布到Hexo
-  console.log('\n[步骤3] 发布到网站...\n');
-  publishToHexo(report, dateStrCN);
+  // 3. 发布到Hexo（仅写文件，不部署）
+  console.log('\n[步骤3] 写入文章...\n');
+  publishToHexo(report, dateStrCN, noDeploy);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
   await updateChronicle(newsItems);
 
-  // 5. 重新部署（包含编年史更新）
-  console.log('\n[步骤5] 重新部署...\n');
-  try {
-    execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
-      cwd: HEXO_DIR,
-      env: {
-        ...process.env,
-        HTTP_PROXY: PROXY_URL,
-        HTTPS_PROXY: PROXY_URL,
-      },
-      stdio: 'inherit',
-    });
-    console.log('[部署] 完成！');
-  } catch (err) {
-    console.error('[部署] 失败:', err.message);
+  // 5. 部署（仅在非 no-deploy 模式下）
+  if (!noDeploy) {
+    console.log('\n[步骤5] 部署网站...\n');
+    try {
+      execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
+        cwd: HEXO_DIR,
+        env: {
+          ...process.env,
+          HTTP_PROXY: PROXY_URL,
+          HTTPS_PROXY: PROXY_URL,
+        },
+        stdio: 'inherit',
+      });
+      console.log('[部署] 完成！');
+    } catch (err) {
+      console.error('[部署] 失败:', err.message);
+    }
   }
 
   console.log('\n========================================');

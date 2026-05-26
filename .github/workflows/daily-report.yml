@@ -4,12 +4,12 @@ on:
   schedule:
     # 北京时间每天早上 8:00 (UTC+8 = 00:00 UTC)
     - cron: '0 0 * * *'
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
 
 jobs:
-  generate-and-deploy:
+  generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -34,7 +34,7 @@ jobs:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
-        run: node scripts/ai-daily.js
+        run: node scripts/ai-daily.js --no-deploy
 
       - name: Run Society Daily Report
         env:
@@ -42,15 +42,14 @@ jobs:
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
-        run: node scripts/society-daily.js
+        run: node scripts/society-daily.js --no-deploy
 
-      - name: Deploy to GitHub Pages
+      - name: Build & Deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           git config --global user.name "theman6660"
           git config --global user.email "theman6660@users.noreply.github.com"
-          # 用 token 鉴权替换 deploy repo URL
           node -e "
             const fs=require('fs'),yml=fs.readFileSync('_config.yml','utf8');
             const token=process.env.DEPLOY_TOKEN;

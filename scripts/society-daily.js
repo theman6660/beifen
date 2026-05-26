@@ -174,6 +174,7 @@ tags: [社会心理, 精神分析, 时代精神]
 
 // ============ 主流程 ============
 async function main() {
+  const noDeploy = process.argv.includes('--no-deploy');
   // 支持 --days-ago N 参数，生成N天前的日报
   const daysAgo = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--days-ago') || '0');
   const targetDate = new Date();
@@ -206,24 +207,26 @@ async function main() {
   }
   console.log(`\n--- 日报预览 ---\n${report.slice(0, 500)}...\n`);
 
-  // 步骤3: 发布到Hexo
-  console.log('[步骤3] 发布到Hexo...');
+  // 步骤3: 写入文章
+  console.log('[步骤3] 写入文章...');
   publishToHexo(report, dateStr, dateISO);
 
-  // 步骤4: 部署
-  console.log('[步骤4] 部署网站...');
-  try {
-    execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
-      cwd: HEXO_DIR,
-      stdio: 'inherit',
-      env: {
-        ...process.env,
-        HTTP_PROXY: PROXY_URL,
-        HTTPS_PROXY: PROXY_URL,
-      },
-    });
-  } catch (err) {
-    console.error('[部署] 失败:', err.message);
+  // 步骤4: 部署（仅在非 no-deploy 模式下）
+  if (!noDeploy) {
+    console.log('[步骤4] 部署网站...');
+    try {
+      execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
+        cwd: HEXO_DIR,
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          HTTP_PROXY: PROXY_URL,
+          HTTPS_PROXY: PROXY_URL,
+        },
+      });
+    } catch (err) {
+      console.error('[部署] 失败:', err.message);
+    }
   }
 
   console.log('\n========================================');
