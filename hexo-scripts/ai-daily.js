@@ -210,6 +210,11 @@ ${newsText}
       }
     }
 
+    updatedChronicle = updatedChronicle.replace(
+      /date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
+      `date: ${dateISO} 08:00:00`
+    );
+
     fs.writeFileSync(CHRONICLE_FILE, updatedChronicle, 'utf-8');
     console.log(`[编年史] 已更新`);
   } catch (err) {
