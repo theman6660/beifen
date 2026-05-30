@@ -14,13 +14,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
-      - run: cd scripts && npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
+      - run: npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
       - name: Generate AI Daily
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
-        run: node scripts/ai-daily.js --no-deploy
+        run: node ai-daily.js --no-deploy
       - uses: actions/upload-artifact@v4
         with:
           name: ai-posts
@@ -34,14 +34,14 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
       - run: npm ci
-      - run: cd scripts && npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
+      - run: npm install openai@^4.0.0 rss-parser@^3.13.0 dotenv@^16.4.0 https-proxy-agent@^9.0.0
       - name: Generate Society Daily
         env:
           AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
-        run: node scripts/society-daily.js --no-deploy
+        run: node society-daily.js --no-deploy
       - uses: actions/upload-artifact@v4
         with:
           name: society-posts
