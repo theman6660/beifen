@@ -237,11 +237,6 @@ ${newsText}
       }
     }
 
-    updatedChronicle = updatedChronicle.replace(
-      /date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
-      `date: ${dateISO} 08:00:00`
-    );
-
     fs.writeFileSync(CHRONICLE_FILE, updatedChronicle, 'utf-8');
     console.log(`[编年史] 已更新: ${resultText.split('\n')[0]}...`);
   } catch (err) {
@@ -250,13 +245,13 @@ ${newsText}
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStr, noDeploy = false) {
-  const fileName = `ai-daily-${dateStr}.md`;
+function publishToHexo(report, dateStrCN, dateISO, noDeploy = false) {
+  const fileName = `ai-daily-${dateStrCN}.md`;
   const filePath = path.join(HEXO_DIR, 'source', '_posts', fileName);
 
   const hexoContent = `---
-title: AI行业日报 - ${dateStr}
-date: ${new Date().toISOString().slice(0, 19).replace('T', ' ')}
+title: AI行业日报 - ${dateStrCN}
+date: ${dateISO} 08:00:00
 categories: [AI日报]
 tags: [AI, 行业日报, 科技新闻]
 ---
@@ -297,7 +292,7 @@ async function main() {
 
   // 3. 发布到Hexo（仅写文件，不部署）
   console.log('\n[步骤3] 写入文章...\n');
-  publishToHexo(report, dateStrCN, noDeploy);
+  publishToHexo(report, dateStrCN, dateStr, noDeploy);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');

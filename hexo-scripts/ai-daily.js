@@ -210,11 +210,6 @@ ${newsText}
       }
     }
 
-    updatedChronicle = updatedChronicle.replace(
-      /date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
-      `date: ${dateISO} 08:00:00`
-    );
-
     fs.writeFileSync(CHRONICLE_FILE, updatedChronicle, 'utf-8');
     console.log(`[编年史] 已更新`);
   } catch (err) {
@@ -223,13 +218,13 @@ ${newsText}
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStr) {
+function publishToHexo(report, dateStr, dateISO) {
   const fileName = `ai-daily-${dateStr}.md`;
   const filePath = path.join(HEXO_DIR, 'source', '_posts', fileName);
 
   const hexoContent = `---
 title: AI行业日报 - ${dateStr}
-date: ${new Date().toISOString().slice(0, 19).replace('T', ' ')}
+date: ${dateISO} 08:00:00
 categories: [AI日报]
 tags: [AI, 行业日报, 科技新闻]
 ---
@@ -249,6 +244,7 @@ async function main() {
 
   const today = new Date();
   const dateStrCN = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+  const dateISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   console.log('[步骤1] 抓取AI新闻...\n');
   const newsItems = await fetchNews();
@@ -263,7 +259,7 @@ async function main() {
   const report = await generateReport(newsItems);
 
   console.log('\n[步骤3] 发布到网站...\n');
-  publishToHexo(report, dateStrCN);
+  publishToHexo(report, dateStrCN, dateISO);
 
   console.log('\n[步骤4] 更新编年史...\n');
   await updateChronicle(newsItems);
