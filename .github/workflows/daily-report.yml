@@ -16,7 +16,7 @@ jobs:
       - run: npm install
       - name: Generate AI Daily
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
         run: node ai-daily.js --no-deploy
@@ -35,7 +35,7 @@ jobs:
       - run: npm install
       - name: Generate Society Daily
         env:
-          AUTH_TOKEN: ${{ secrets.AUTH_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
           BASE_URL: ${{ secrets.BASE_URL }}
           MODEL: ${{ secrets.MODEL }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
