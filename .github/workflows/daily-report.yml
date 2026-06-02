@@ -74,26 +74,30 @@ jobs:
           for f in source/_posts/ai-daily-*.md source/_posts/society-daily-*.md; do
             [ -f "$f" ] || continue
             echo "检查: $f"
-            # 提取 frontmatter（两个 --- 之间的内容）
             fm=$(sed -n '/^---$/,/^---$/p' "$f")
             if [ -z "$fm" ]; then
               echo "  ❌ 缺少 frontmatter"
               errors=$((errors + 1))
               continue
             fi
-            # 检查必需字段
+            ok=true
             for field in title date; do
               if ! echo "$fm" | grep -q "^${field}:"; then
                 echo "  ❌ 缺少必需字段: $field"
                 errors=$((errors + 1))
+                ok=false
               fi
             done
-            # 检查 YAML 合法性：冒号后必须有空格（防止解析失败）
-            if echo "$fm" | grep -qP '(?<!:):(?![\s/])'; then
-              echo "  ❌ frontmatter 中有不合法的冒号（可能造成 YAML 解析失败）"
+            # 只检查 frontmatter 字段行（非缩进行、非正文）：冒号后必须有空格或换行
+            bad=$(echo "$fm" | grep -P '^[a-zA-Z_-]+:[^ \n]' || true)
+            if [ -n "$bad" ]; then
+              echo "  ❌ YAML 字段格式错误（冒号后缺空格）: $bad"
               errors=$((errors + 1))
+              ok=false
             fi
-            echo "  ✅ 通过"
+            if $ok; then
+              echo "  ✅ 通过"
+            fi
           done
           if [ $errors -gt 0 ]; then
             echo "❌ 验证失败，$errors 个错误，中止部署"
