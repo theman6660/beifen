@@ -75,4 +75,5 @@ jobs:
             const updated=yml.replace(/repo:\s*https:\/\/github\.com/g,'repo: https://x-access-token:'+token+'@github.com');
             fs.writeFileSync('_config.yml',updated);
           "
+          npx hexo clean
           npx hexo deploy

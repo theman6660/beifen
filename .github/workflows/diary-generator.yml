@@ -30,9 +30,8 @@ jobs:
         run: node hexo-scripts/diary-generator.js
         timeout-minutes: 5
 
-      - name: Commit and deploy
+      - name: Commit and push
         run: |
-          npm ci
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # 只在有diary文件时才add
@@ -43,13 +42,4 @@ jobs:
           git diff --staged --quiet || git commit -m "docs: 日记 $(date +%Y-%m-%d)"
           git pull --rebase
           git push
-          npx hexo generate
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          personal_token: ${{ secrets.DEPLOY_TOKEN }}
-          external_repository: theman6660/theman6660.github.io
-          publish_branch: main
-          publish_dir: ./public
-          force_orphan: true
+      # 不在此部署 — 部署由 daily-report.yml 统一处理，避免两个 workflow 互相覆盖
