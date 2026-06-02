@@ -223,6 +223,7 @@ ${newsText}
 - **${dateStrCN}**：事件描述
   - **为什么重要**：社会/思想影响（2-3句）
 
+注意：输出中不要包含任何以 ## 或 ### 开头的行（Markdown标题格式），这会破坏文档结构。
 直接输出，不要解释。`;
 
   try {
@@ -233,13 +234,18 @@ ${newsText}
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const resultText = response?.choices?.[0]?.message?.content?.trim() || '';
-    console.log(`[编年史] 结果: "${resultText.slice(0, 200)}"`);
+    const rawText = response?.choices?.[0]?.message?.content?.trim() || '';
+    console.log(`[编年史] 结果: "${rawText.slice(0, 200)}"`);
 
-    if (resultText.includes('无更新') || !resultText) {
+    if (rawText.includes('无更新') || !rawText) {
       console.log('[编年史] 今日无重大事件，不更新');
       return;
     }
+
+    // 清理LLM输出中的Markdown标题，防止破坏文档结构
+    const resultText = rawText
+      .replace(/^## /gm, '**##** ')
+      .replace(/^### /gm, '**###** ');
 
     // 检查今天是否已有条目（防止重复）
     const todayMarker = `**${dateStrCN}**`;
@@ -255,8 +261,9 @@ ${newsText}
 
     let yearSectionEnd = existingChronicle.length;
     if (yearIndex !== -1) {
-      const nextYear = existingChronicle.indexOf('\n## ', yearIndex + yearHeader.length);
-      if (nextYear !== -1) yearSectionEnd = nextYear;
+      const afterYearHdr = yearIndex + yearHeader.length;
+      const nextYearMatch = existingChronicle.slice(afterYearHdr).match(/\n## \d{4}年/);
+      if (nextYearMatch) yearSectionEnd = afterYearHdr + nextYearMatch.index;
     }
 
     let updatedChronicle;
@@ -265,12 +272,8 @@ ${newsText}
       // 当月 section 已存在：插在当月已有内容之后、下一个月/年之前
       const monthIndexInYear = existingChronicle.indexOf(monthHeader, yearIndex);
       const afterMonth = monthIndexInYear + monthHeader.length;
-      const nextSection = existingChronicle.indexOf('\n### ', afterMonth);
-      const nextChapter = existingChronicle.indexOf('\n## ', afterMonth);
-      const insertPoint = Math.min(
-        nextSection === -1 ? yearSectionEnd : nextSection,
-        nextChapter === -1 ? yearSectionEnd : nextChapter
-      );
+      const nextBoundary = existingChronicle.slice(afterMonth).search(/\n(?:## \d{4}年|### \d{1,2}月)/);
+      const insertPoint = nextBoundary === -1 ? yearSectionEnd : afterMonth + nextBoundary;
 
       updatedChronicle = existingChronicle.slice(0, insertPoint) + '\n' + resultText + '\n' + existingChronicle.slice(insertPoint);
     } else if (yearIndex !== -1) {
@@ -284,12 +287,8 @@ ${newsText}
         if (existingMonth < month) {
           const absPos = yearIndex + m.index;
           const afterExistingMonth = absPos + m[0].length;
-          const nextSec = existingChronicle.indexOf('\n### ', afterExistingMonth);
-          const nextCh = existingChronicle.indexOf('\n## ', afterExistingMonth);
-          const secEnd = Math.min(
-            nextSec === -1 ? yearSectionEnd : nextSec,
-            nextCh === -1 ? yearSectionEnd : nextCh
-          );
+          const nextBoundary = existingChronicle.slice(afterExistingMonth).search(/\n(?:## \d{4}年|### \d{1,2}月)/);
+          const secEnd = nextBoundary === -1 ? yearSectionEnd : afterExistingMonth + nextBoundary;
           insertAfter = secEnd;
         }
       }
