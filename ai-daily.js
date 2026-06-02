@@ -7,12 +7,29 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 // ============ 配置 ============
-const PROXY_URL = process.env.PROXY_URL;
-const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined;
+const PROXY_URL = (process.env.PROXY_URL || '').trim();
+let proxyAgent;
+if (PROXY_URL) {
+  try {
+    proxyAgent = new HttpsProxyAgent(PROXY_URL);
+  } catch (err) {
+    console.error(`[配置] 代理 URL 无效，将跳过代理: ${err.message}`);
+  }
+}
+
+// 启动时验证必需环境变量
+['AUTH_TOKEN', 'BASE_URL', 'MODEL'].forEach(key => {
+  if (!process.env[key]) {
+    console.error(`错误: 环境变量 ${key} 未设置`);
+    process.exit(1);
+  }
+});
 
 const client = new OpenAI({
   apiKey: process.env.AUTH_TOKEN,
   baseURL: process.env.BASE_URL,
+  timeout: 90000,
+  maxRetries: 2,
 });
 
 const parser = new RSSParser({
@@ -21,6 +38,31 @@ const parser = new RSSParser({
 
 const HEXO_DIR = process.env.HEXO_DIR || '.';
 const CHRONICLE_FILE = path.join(HEXO_DIR, 'source', '_posts', 'ai-chronicle.md');
+
+// ============ 北京时间工具函数 ============
+function beijingNow() {
+  const now = new Date();
+  // UTC+8
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+}
+
+function getBeijingDateParts(d = beijingNow()) {
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function beijingDateISO(d = beijingNow()) {
+  const p = getBeijingDateParts(d);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+function beijingDateCN(d = beijingNow()) {
+  const p = getBeijingDateParts(d);
+  return `${p.year}年${p.month}月${p.day}日`;
+}
 
 // AI新闻RSS源
 const RSS_SOURCES = [
@@ -32,7 +74,6 @@ const RSS_SOURCES = [
   { url: 'https://9to5google.com/feed/', name: '9to5Google' },
 ];
 
-// 中文AI新闻源
 const RSS_SOURCES_CN = [
   { url: 'https://www.36kr.com/feed', name: '36氪' },
   { url: 'https://sspai.com/feed', name: '少数派' },
@@ -40,10 +81,10 @@ const RSS_SOURCES_CN = [
 
 // ============ RSS抓取 ============
 async function fetchNews() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
+  const bj = beijingNow();
+  const todayBeijing = new Date(Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate()));
+  const yesterday = new Date(todayBeijing);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
 
   const allItems = [];
   const sources = [...RSS_SOURCES, ...RSS_SOURCES_CN];
@@ -61,8 +102,8 @@ async function fetchNews() {
           return !isNaN(pubDate.getTime()) && pubDate >= yesterday;
         })
         .map(item => ({
-          title: item.title,
-          link: item.link,
+          title: item.title || '(无标题)',
+          link: item.link || '',
           date: item.pubDate || item.isoDate,
           source: source.name,
           snippet: (item.contentSnippet || item.content || '').slice(0, 300),
@@ -76,7 +117,6 @@ async function fetchNews() {
     }
   }
 
-  // 按时间排序，最新的在前；无效日期的放末尾
   allItems.sort((a, b) => {
     const ta = a._timestamp;
     const tb = b._timestamp;
@@ -90,8 +130,8 @@ async function fetchNews() {
 
 // ============ LLM生成报告 ============
 async function generateReport(newsItems) {
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+  const dateStrCN = beijingDateCN();
+  const dateISO = beijingDateISO();
 
   const newsText = newsItems.map((item, i) =>
     `${i + 1}. [${item.source}] ${item.title}\n   链接: ${item.link}\n   摘要: ${item.snippet}`
@@ -103,7 +143,7 @@ async function generateReport(newsItems) {
 ${newsText}
 
 要求：
-1. 标题：AI行业日报 - ${dateStr}
+1. 标题：AI行业日报 - ${dateStrCN}
 2. 结构：
    - 今日要闻（最重要的2-3条新闻，详细分析）
    - 行业动态（其他值得关注的新闻，简要概述）
@@ -116,28 +156,28 @@ ${newsText}
 5. 总字数控制在1500-2500字
 6. 直接输出文章内容，不要加markdown代码块标记`;
 
+  console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await client.chat.completions.create({
     model: process.env.MODEL,
     max_tokens: 4000,
     messages: [{ role: 'user', content: prompt }],
   });
 
-  return response.choices[0].message.content || '';
+  const content = response?.choices?.[0]?.message?.content;
+  return content?.trim() || '';
 }
 
 // ============ 编年史更新 ============
 async function updateChronicle(newsItems) {
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
-  const dateISO = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const { year, month, day } = getBeijingDateParts();
+  const dateStrCN = beijingDateCN();
+  const dateISO = beijingDateISO();
 
-  // 读取现有编年史
   let existingChronicle = '';
   if (fs.existsSync(CHRONICLE_FILE)) {
     existingChronicle = fs.readFileSync(CHRONICLE_FILE, 'utf-8');
   }
 
-  // 如果编年史不存在，创建初始结构
   if (!existingChronicle) {
     existingChronicle = `---
 title: AI编年史：从图灵到此刻
@@ -152,9 +192,9 @@ tags: [编年史, 时间线, AI]
 
 ---
 
-## ${today.getFullYear()}年
+## ${year}年
 
-### ${today.getMonth() + 1}月
+### ${month}月
 
 `;
   }
@@ -175,8 +215,7 @@ ${newsText}
 如果没有符合条件的事件，只输出：无更新
 
 如果有，输出格式：
-### ${today.getMonth() + 1}月
-- **${dateStr}**：事件描述
+- **${dateStrCN}**：事件描述
   - **为什么重要**：社会/思想影响（2-3句）
 
 直接输出，不要解释。`;
@@ -189,61 +228,86 @@ ${newsText}
       messages: [{ role: 'user', content: prompt }],
     });
 
-    const resultText = response.choices[0].message.content?.trim() || '';
-    console.log(`[编年史] 最终结果: "${resultText.slice(0, 200)}"`);
+    const resultText = response?.choices?.[0]?.message?.content?.trim() || '';
+    console.log(`[编年史] 结果: "${resultText.slice(0, 200)}"`);
 
     if (resultText.includes('无更新') || !resultText) {
       console.log('[编年史] 今日无重大事件，不更新');
       return;
     }
 
-    // 在编年史的适当位置插入新条目
-    const monthHeader = `### ${today.getMonth() + 1}月`;
-    let updatedChronicle;
-
-    const yearHeader = `## ${today.getFullYear()}年`;
-    const yearIndex = existingChronicle.indexOf(yearHeader);
-    let yearSectionEnd = -1;
-    if (yearIndex !== -1) {
-      const nextYear = existingChronicle.indexOf('\n## ', yearIndex + yearHeader.length);
-      yearSectionEnd = nextYear === -1 ? existingChronicle.length : nextYear;
+    // 检查今天是否已有条目（防止重复）
+    const todayMarker = `**${dateStrCN}**`;
+    if (existingChronicle.includes(todayMarker)) {
+      console.log('[编年史] 今日已有条目，跳过');
+      return;
     }
 
+    // 在编年史中插入新条目
+    const monthHeader = `### ${month}月`;
+    const yearHeader = `## ${year}年`;
+    const yearIndex = existingChronicle.indexOf(yearHeader);
+
+    let yearSectionEnd = existingChronicle.length;
+    if (yearIndex !== -1) {
+      const nextYear = existingChronicle.indexOf('\n## ', yearIndex + yearHeader.length);
+      if (nextYear !== -1) yearSectionEnd = nextYear;
+    }
+
+    let updatedChronicle;
+
     if (yearIndex !== -1 && existingChronicle.slice(yearIndex, yearSectionEnd).includes(monthHeader)) {
+      // 当月 section 已存在：插在当月已有内容之后、下一个月/年之前
       const monthIndexInYear = existingChronicle.indexOf(monthHeader, yearIndex);
       const afterMonth = monthIndexInYear + monthHeader.length;
-      const nextSection = existingChronicle.indexOf('\n###', afterMonth + 1);
-      const nextChapter = existingChronicle.indexOf('\n##', afterMonth + 1);
+      const nextSection = existingChronicle.indexOf('\n### ', afterMonth);
+      const nextChapter = existingChronicle.indexOf('\n## ', afterMonth);
       const insertPoint = Math.min(
-        nextSection === -1 ? Infinity : nextSection,
-        nextChapter === -1 ? Infinity : nextChapter
+        nextSection === -1 ? yearSectionEnd : nextSection,
+        nextChapter === -1 ? yearSectionEnd : nextChapter
       );
 
-      if (insertPoint === Infinity) {
-        updatedChronicle = existingChronicle + '\n' + resultText + '\n';
-      } else {
-        updatedChronicle = existingChronicle.slice(0, insertPoint) + '\n' + resultText + '\n' + existingChronicle.slice(insertPoint);
-      }
+      updatedChronicle = existingChronicle.slice(0, insertPoint) + '\n' + resultText + '\n' + existingChronicle.slice(insertPoint);
     } else if (yearIndex !== -1) {
-      const afterYear = yearIndex + yearHeader.length;
-      updatedChronicle = existingChronicle.slice(0, afterYear) + '\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(afterYear);
+      // 当月 section 不存在：按月份顺序插入
+      const yearSection = existingChronicle.slice(yearIndex, yearSectionEnd);
+      const monthRegex = /### (\d+)月/g;
+      let insertAfter = yearIndex + yearHeader.length;
+      let m;
+      while ((m = monthRegex.exec(yearSection)) !== null) {
+        const existingMonth = parseInt(m[1], 10);
+        if (existingMonth < month) {
+          const absPos = yearIndex + m.index;
+          const afterExistingMonth = absPos + m[0].length;
+          const nextSec = existingChronicle.indexOf('\n### ', afterExistingMonth);
+          const nextCh = existingChronicle.indexOf('\n## ', afterExistingMonth);
+          const secEnd = Math.min(
+            nextSec === -1 ? yearSectionEnd : nextSec,
+            nextCh === -1 ? yearSectionEnd : nextCh
+          );
+          insertAfter = secEnd;
+        }
+      }
+      updatedChronicle = existingChronicle.slice(0, insertAfter) + '\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(insertAfter);
     } else {
+      // 今年 section 不存在
       const firstYearMatch = existingChronicle.match(/\n## \d{4}年/);
       if (firstYearMatch) {
         const insertAt = existingChronicle.indexOf(firstYearMatch[0]);
-        updatedChronicle = existingChronicle.slice(0, insertAt) + '\n\n## ' + today.getFullYear() + '年\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(insertAt);
+        updatedChronicle = existingChronicle.slice(0, insertAt) + '\n\n## ' + year + '年\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(insertAt);
       } else {
-        updatedChronicle = existingChronicle + '\n## ' + today.getFullYear() + '年\n\n' + monthHeader + '\n' + resultText + '\n';
+        updatedChronicle = existingChronicle + '\n## ' + year + '年\n\n' + monthHeader + '\n' + resultText + '\n';
       }
     }
 
+    // 只在 frontmatter 中更新日期
     updatedChronicle = updatedChronicle.replace(
-      /date: \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/,
-      `date: ${dateISO} 08:00:00`
+      /^(---[\s\S]*?^date: )\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/m,
+      `$1${dateISO} 08:00:00`
     );
 
     fs.writeFileSync(CHRONICLE_FILE, updatedChronicle, 'utf-8');
-    console.log(`[编年史] 已更新: ${resultText.split('\n')[0]}...`);
+    console.log(`[编年史] 已更新: ${resultText.split('\n')[0]}`);
   } catch (err) {
     console.error('[编年史] 更新失败:', err.message);
   }
@@ -251,8 +315,14 @@ ${newsText}
 
 // ============ 发布到Hexo ============
 function publishToHexo(report, dateStrCN, dateISO, noDeploy = false) {
-  const fileName = `ai-daily-${dateStrCN}.md`;
-  const filePath = path.join(HEXO_DIR, 'source', '_posts', fileName);
+  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  if (!fs.existsSync(postsDir)) {
+    fs.mkdirSync(postsDir, { recursive: true });
+  }
+
+  // 使用 ISO 日期做文件名，避免中文 URL 编码
+  const fileName = `ai-daily-${dateISO}.md`;
+  const filePath = path.join(postsDir, fileName);
 
   const hexoContent = `---
 title: AI行业日报 - ${dateStrCN}
@@ -277,9 +347,8 @@ async function main() {
   if (noDeploy) console.log('  (仅生成，不部署)');
   console.log('========================================\n');
 
-  const today = new Date();
-  const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-  const dateStrCN = `${today.getFullYear()}年${today.getMonth() + 1}月${today.getDate()}日`;
+  const dateISO = beijingDateISO();
+  const dateStrCN = beijingDateCN();
 
   // 1. 抓取新闻
   console.log('[步骤1] 抓取AI新闻...\n');
@@ -295,30 +364,37 @@ async function main() {
   console.log('[步骤2] 生成行业报告...\n');
   const report = await generateReport(newsItems);
 
-  // 3. 发布到Hexo（仅写文件，不部署）
+  if (!report) {
+    console.log('[跳过] LLM 未返回内容');
+    return;
+  }
+
+  // 3. 发布到Hexo
   console.log('\n[步骤3] 写入文章...\n');
-  publishToHexo(report, dateStrCN, dateStr, noDeploy);
+  publishToHexo(report, dateStrCN, dateISO, noDeploy);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
   await updateChronicle(newsItems);
 
-  // 5. 部署（仅在非 no-deploy 模式下）
+  // 5. 部署
   if (!noDeploy) {
     console.log('\n[步骤5] 部署网站...\n');
+    const env = { ...process.env };
+    if (PROXY_URL) {
+      env.HTTP_PROXY = PROXY_URL;
+      env.HTTPS_PROXY = PROXY_URL;
+    }
     try {
       execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
         cwd: HEXO_DIR,
-        env: {
-          ...process.env,
-          HTTP_PROXY: PROXY_URL,
-          HTTPS_PROXY: PROXY_URL,
-        },
+        env,
         stdio: 'inherit',
       });
       console.log('[部署] 完成！');
     } catch (err) {
       console.error('[部署] 失败:', err.message);
+      process.exit(1);
     }
   }
 
@@ -328,7 +404,12 @@ async function main() {
   console.log('========================================');
 }
 
+process.on('unhandledRejection', (reason) => {
+  console.error('未处理的异常:', reason);
+  process.exit(1);
+});
+
 main().catch(err => {
-  console.error('错误:', err.message);
+  console.error('错误:', err.stack || err.message || String(err));
   process.exit(1);
 });

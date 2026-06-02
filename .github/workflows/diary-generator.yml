@@ -8,9 +8,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: diary-generate
+  cancel-in-progress: false
+
 jobs:
   generate-diary:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,12 +38,25 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # 只在有diary文件时才add
-          if ls source/_posts/diary-*.md 1>/dev/null 2>&1; then
-            git add source/_posts/diary-*.md
-          fi
-          git add data/snippets/ 2>/dev/null || true
-          git diff --staged --quiet || git commit -m "docs: 日记 $(date +%Y-%m-%d)"
+
+          # 先拉取最新代码，再提交（避免 rebase 冲突丢数据）
           git pull --rebase
-          git push
-      # 不在此部署 — 部署由 daily-report.yml 统一处理，避免两个 workflow 互相覆盖
+
+          diary_generated=false
+          shopt -s nullglob
+          for f in source/_posts/diary-*.md; do
+            git add "$f"
+            diary_generated=true
+          done
+
+          git add data/snippets/ 2>/dev/null || true
+
+          if git diff --staged --quiet; then
+            echo "无变更，跳过提交"
+          elif $diary_generated; then
+            git commit -m "docs: 日记 $(date +%Y-%m-%d)"
+            git push
+          else
+            git commit -m "chore: 更新 snippets $(date +%Y-%m-%d)"
+            git push
+          fi

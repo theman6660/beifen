@@ -8,11 +8,28 @@ const { execSync } = require('child_process');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
-const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined;
+let proxyAgent;
+if (PROXY_URL) {
+  try {
+    proxyAgent = new HttpsProxyAgent(PROXY_URL);
+  } catch (err) {
+    console.error(`[配置] 代理 URL 无效，将跳过代理: ${err.message}`);
+  }
+}
+
+// 启动时验证必需环境变量
+['AUTH_TOKEN', 'BASE_URL', 'MODEL'].forEach(key => {
+  if (!process.env[key]) {
+    console.error(`错误: 环境变量 ${key} 未设置`);
+    process.exit(1);
+  }
+});
 
 const client = new OpenAI({
   apiKey: process.env.AUTH_TOKEN,
   baseURL: process.env.BASE_URL,
+  timeout: 90000,
+  maxRetries: 2,
 });
 
 const parser = new RSSParser({
@@ -23,8 +40,6 @@ const HEXO_DIR = process.env.HEXO_DIR || '.';
 const RSSHUB_URL = (process.env.RSSHUB_URL || '').trim().replace(/\/$/, '');
 
 // ============ RSS源 ============
-
-// 直连源（不需要RSSHub，始终可用）
 const DIRECT_SOURCES = [
   { url: 'https://sspai.com/feed', name: '少数派' },
   { url: 'https://www.ruanyifeng.com/blog/atom.xml', name: '阮一峰周刊' },
@@ -32,7 +47,6 @@ const DIRECT_SOURCES = [
   { url: 'https://longreads.com/feed/', name: 'Longreads' },
 ];
 
-// RSSHub源（需要自建RSSHub实例，配置RSSHUB_URL后自动启用）
 const RSSHUB_SOURCES = [
   { path: '/thepaper/featured', name: '澎湃新闻·思想' },
   { path: '/neweekly/tag/社会', name: '新周刊' },
@@ -44,7 +58,6 @@ const RSSHUB_SOURCES = [
   { path: '/weibo/search/hot', name: '微博热搜' },
 ];
 
-// 合并所有源
 function getAllSources() {
   const sources = [...DIRECT_SOURCES];
   if (RSSHUB_URL) {
@@ -81,8 +94,8 @@ async function fetchNews() {
           return !isNaN(pubDate.getTime()) && pubDate >= yesterday;
         })
         .map(item => ({
-          title: item.title,
-          link: item.link,
+          title: item.title || '(无标题)',
+          link: item.link || '',
           date: item.pubDate || item.isoDate,
           source: source.name,
           snippet: (item.contentSnippet || item.content || '').slice(0, 300),
@@ -92,11 +105,10 @@ async function fetchNews() {
       allItems.push(...recentItems);
       console.log(`  -> 获取 ${recentItems.length} 条`);
     } catch (err) {
-      console.log(`  -> ${source.name} 抓取失败: ${err.message}`);
+      console.log(`  -> ${source.name} 抓取失败: ${err.message || String(err)}`);
     }
   }
 
-  // 按时间排序，最新的在前；无效日期的放末尾
   allItems.sort((a, b) => {
     const ta = a._timestamp;
     const tb = b._timestamp;
@@ -110,8 +122,13 @@ async function fetchNews() {
 
 // ============ 生成日报 ============
 async function generateReport(newsItems, dateStr) {
+  const MAX_NEWS = 30;
+  const truncated = newsItems.length > MAX_NEWS;
+  if (truncated) {
+    console.log(`[提示] 新闻共 ${newsItems.length} 条，取前 ${MAX_NEWS} 条用于生成`);
+  }
 
-  const newsText = newsItems.slice(0, 30).map((item, i) =>
+  const newsText = newsItems.slice(0, MAX_NEWS).map((item, i) =>
     `${i + 1}. [${item.source}] ${item.title}\n   链接: ${item.link}\n   摘要: ${item.snippet}`
   ).join('\n\n');
 
@@ -151,16 +168,23 @@ ${newsText}
     messages: [{ role: 'user', content: prompt }],
   });
 
-  return response.choices[0].message.content?.trim() || '';
+  const content = response?.choices?.[0]?.message?.content;
+  return content?.trim() || '';
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStr, dateISO) {
-  const fileName = `society-daily-${dateStr}.md`;
-  const filePath = path.join(HEXO_DIR, 'source', '_posts', fileName);
+function publishToHexo(report, dateStrCN, dateISO) {
+  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  if (!fs.existsSync(postsDir)) {
+    fs.mkdirSync(postsDir, { recursive: true });
+  }
+
+  // 使用 ISO 日期做文件名，避免中文 URL 编码
+  const fileName = `society-daily-${dateISO}.md`;
+  const filePath = path.join(postsDir, fileName);
 
   const frontMatter = `---
-title: 社会思想日报 - ${dateStr}
+title: 社会思想日报 - ${dateStrCN}
 date: ${dateISO} 08:30:00
 categories: [社会日报]
 tags: [社会心理, 精神分析, 时代精神]
@@ -169,25 +193,49 @@ tags: [社会心理, 精神分析, 时代精神]
 `;
 
   fs.writeFileSync(filePath, frontMatter + report, 'utf-8');
-  console.log(`[发布] 已写入: ${filePath}`);
+  console.log(`[发布] 已写入: ${fileName}`);
+}
+
+// ============ 参数解析 ============
+function parseArgs() {
+  const noDeploy = process.argv.includes('--no-deploy');
+
+  // 安全解析 --days-ago：找到标志后的值，校验为合法非负整数
+  let daysAgo = 0;
+  const daysAgoIdx = process.argv.indexOf('--days-ago');
+  if (daysAgoIdx !== -1 && daysAgoIdx + 1 < process.argv.length) {
+    const val = process.argv[daysAgoIdx + 1];
+    const num = parseInt(val, 10);
+    if (!isNaN(num) && num >= 0 && String(num) === val) {
+      daysAgo = num;
+    } else {
+      console.error(`错误: --days-ago 需要非负整数，收到: "${val}"`);
+      process.exit(1);
+    }
+  }
+
+  return { noDeploy, daysAgo };
 }
 
 // ============ 主流程 ============
 async function main() {
-  const noDeploy = process.argv.includes('--no-deploy');
-  // 支持 --days-ago N 参数，生成N天前的日报
-  const daysAgo = parseInt(process.argv.find((a, i) => process.argv[i - 1] === '--days-ago') || '0');
+  const { noDeploy, daysAgo } = parseArgs();
   const targetDate = new Date();
   targetDate.setDate(targetDate.getDate() - daysAgo);
-  const dateStr = `${targetDate.getFullYear()}年${targetDate.getMonth() + 1}月${targetDate.getDate()}日`;
+
+  if (isNaN(targetDate.getTime())) {
+    console.error('错误: 日期计算出错');
+    process.exit(1);
+  }
+
+  const dateStrCN = `${targetDate.getFullYear()}年${targetDate.getMonth() + 1}月${targetDate.getDate()}日`;
   const dateISO = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
 
   console.log('========================================');
   console.log('  社会思想日报生成器');
-  if (daysAgo > 0) console.log(`  生成日期: ${dateStr} (${daysAgo}天前)`);
+  if (daysAgo > 0) console.log(`  生成日期: ${dateStrCN} (${daysAgo}天前)`);
   console.log('========================================\n');
 
-  // 步骤1: 抓取新闻
   console.log('[步骤1] 抓取社会新闻...');
   const newsItems = await fetchNews();
   console.log(`\n共获取 ${newsItems.length} 条新闻\n`);
@@ -197,9 +245,8 @@ async function main() {
     return;
   }
 
-  // 步骤2: 生成日报
   console.log('[步骤2] 生成社会思想日报...');
-  const report = await generateReport(newsItems, dateStr);
+  const report = await generateReport(newsItems, dateStrCN);
 
   if (!report) {
     console.log('LLM未返回内容，退出');
@@ -207,25 +254,26 @@ async function main() {
   }
   console.log(`\n--- 日报预览 ---\n${report.slice(0, 500)}...\n`);
 
-  // 步骤3: 写入文章
   console.log('[步骤3] 写入文章...');
-  publishToHexo(report, dateStr, dateISO);
+  publishToHexo(report, dateStrCN, dateISO);
 
-  // 步骤4: 部署（仅在非 no-deploy 模式下）
   if (!noDeploy) {
     console.log('[步骤4] 部署网站...');
+    const env = { ...process.env };
+    if (PROXY_URL) {
+      env.HTTP_PROXY = PROXY_URL;
+      env.HTTPS_PROXY = PROXY_URL;
+    }
     try {
       execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
         cwd: HEXO_DIR,
         stdio: 'inherit',
-        env: {
-          ...process.env,
-          HTTP_PROXY: PROXY_URL,
-          HTTPS_PROXY: PROXY_URL,
-        },
+        env,
       });
+      console.log('[部署] 完成！');
     } catch (err) {
-      console.error('[部署] 失败:', err.message);
+      console.error('[部署] 失败:', err.message || String(err));
+      process.exit(1);
     }
   }
 
@@ -235,7 +283,12 @@ async function main() {
   console.log('========================================');
 }
 
+process.on('unhandledRejection', (reason) => {
+  console.error('未处理的异常:', reason);
+  process.exit(1);
+});
+
 main().catch(err => {
-  console.error('运行失败:', err);
+  console.error('运行失败:', err.stack || err.message || String(err));
   process.exit(1);
 });

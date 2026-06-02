@@ -6,9 +6,17 @@ const HEXO_DIR = __dirname;
 const SNIPPETS_DIR = path.join(HEXO_DIR, 'data', 'snippets');
 const POSTS_DIR = path.join(HEXO_DIR, 'source', '_posts');
 
+// 启动时验证必需的环境变量
+if (!process.env.DEEPSEEK_API_KEY) {
+  console.error('错误: DEEPSEEK_API_KEY 未设置');
+  process.exit(1);
+}
+
 const client = new OpenAI({
   baseURL: 'https://api.deepseek.com',
   apiKey: process.env.DEEPSEEK_API_KEY,
+  timeout: 60000,
+  maxRetries: 2,
 });
 
 function getTodayStr() {
@@ -17,18 +25,40 @@ function getTodayStr() {
 }
 
 function getDateStrCN(dateStr) {
-  const [y, m, d] = dateStr.split('-');
-  return `${y}年${parseInt(m)}月${parseInt(d)}日`;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) {
+    throw new Error(`日期格式无效: ${dateStr}，应为 YYYY-MM-DD`);
+  }
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) {
+    throw new Error(`日期格式无效: ${dateStr}`);
+  }
+  return `${y}年${m}月${d}日`;
+}
+
+// 校验 dateStr 是安全的文件名（防止路径穿越）
+function validateDateStr(dateStr) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    throw new Error(`日期格式无效: "${dateStr}"，必须为 YYYY-MM-DD`);
+  }
 }
 
 // ============ 读snippets ============
 function loadSnippets(dateStr) {
   const file = path.join(SNIPPETS_DIR, `${dateStr}.json`);
-  if (!fs.existsSync(file)) return null;
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf-8'));
+    const raw = fs.readFileSync(file, 'utf-8');
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) {
+      console.error(`[读取] ${dateStr} 格式错误：期望数组，实际为 ${typeof data}`);
+      return null;
+    }
+    return data;
   } catch (err) {
-    console.error(`[读取] ${dateStr} 文件损坏:`, err.message);
+    if (err.code === 'ENOENT') return null;
+    console.error(`[读取] ${dateStr} 文件错误:`, err.message);
     return null;
   }
 }
@@ -36,9 +66,19 @@ function loadSnippets(dateStr) {
 // ============ DeepSeek写日记 ============
 async function generateDiary(snippets, dateStr) {
   const dateCN = getDateStrCN(dateStr);
-  const dayOfWeek = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][new Date(dateStr).getDay()];
+  const [y, m, d] = dateStr.split('-').map(n => parseInt(n, 10));
+  // 用 UTC 计算星期几，避免本地时区偏移
+  const jsDate = new Date(Date.UTC(y, m - 1, d));
+  const dayOfWeek = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][jsDate.getUTCDay()];
 
-  const snippetsText = snippets.map(s =>
+  // 过滤缺少 time/reply 的碎片
+  const validSnippets = snippets.filter(s => s && s.time && s.reply);
+  if (validSnippets.length === 0) {
+    console.log('[跳过] 无有效日记素材');
+    return null;
+  }
+
+  const snippetsText = validSnippets.map(s =>
     `[${s.time}] ${s.reply}`
   ).join('\n');
 
@@ -62,15 +102,18 @@ ${snippetsText}
 
   console.log('[DeepSeek] 正在生成日记...');
   const response = await client.chat.completions.create({
-    model: 'deepseek-chat',
-    messages: [
-      { role: 'user', content: prompt },
-    ],
+    model: 'deepseek-v4-pro',
+    messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1500,
   });
 
-  return response.choices[0].message.content.trim();
+  const content = response?.choices?.[0]?.message?.content;
+  if (!content || !content.trim()) {
+    console.log('[跳过] API 返回空内容');
+    return null;
+  }
+  return content.trim();
 }
 
 // ============ 发布 ============
@@ -78,6 +121,10 @@ function publishToHexo(diaryContent, dateStr) {
   const fileName = `diary-${dateStr}.md`;
   const filePath = path.join(POSTS_DIR, fileName);
   const dateCN = getDateStrCN(dateStr);
+
+  if (!fs.existsSync(POSTS_DIR)) {
+    fs.mkdirSync(POSTS_DIR, { recursive: true });
+  }
 
   const hexoContent = `---
 title: ${dateCN}
@@ -96,7 +143,11 @@ ${diaryContent}
 
 // ============ 主流程 ============
 async function main() {
-  const dateStr = process.argv[2] || getTodayStr();
+  const rawDate = process.argv[2];
+  if (rawDate) {
+    validateDateStr(rawDate);
+  }
+  const dateStr = rawDate || getTodayStr();
   console.log(`========================================`);
   console.log(`  日记生成器 — ${getDateStrCN(dateStr)}`);
   console.log(`========================================\n`);
@@ -110,6 +161,11 @@ async function main() {
   console.log(`[素材] ${snippets.length}条碎片\n`);
 
   const diary = await generateDiary(snippets, dateStr);
+  if (!diary) {
+    console.log('[跳过] 日记生成失败或内容为空');
+    return;
+  }
+
   console.log(`\n[日记] ${diary.slice(0, 100)}...\n`);
 
   publishToHexo(diary, dateStr);
@@ -119,7 +175,12 @@ async function main() {
   console.log('========================================');
 }
 
+process.on('unhandledRejection', (reason) => {
+  console.error('未处理的异常:', reason);
+  process.exit(1);
+});
+
 main().catch(err => {
-  console.error('错误:', err.message);
+  console.error('错误:', err.stack || err.message || String(err));
   process.exit(1);
 });

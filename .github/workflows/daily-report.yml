@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: daily-deploy
+  cancel-in-progress: false
+
 jobs:
   ai-daily:
     runs-on: ubuntu-latest
@@ -27,6 +31,7 @@ jobs:
         with:
           name: ai-posts
           path: source/_posts/ai-daily-*.md
+          if-no-files-found: error
 
   society-daily:
     runs-on: ubuntu-latest
@@ -47,6 +52,7 @@ jobs:
         with:
           name: society-posts
           path: source/_posts/society-daily-*.md
+          if-no-files-found: error
 
   deploy:
     needs: [ai-daily, society-daily]
@@ -56,7 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 完整历史，用于打tag
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: 'npm' }
@@ -91,7 +97,6 @@ jobs:
                 ok=false
               fi
             done
-            # 只检查 frontmatter 字段行（非缩进行、非正文）：冒号后必须有空格或换行
             bad=$(echo "$fm" | grep -P '^[a-zA-Z_-]+:[^ \n]' || true)
             if [ -n "$bad" ]; then
               echo "  ❌ YAML 字段格式错误（冒号后缺空格）: $bad"
@@ -109,34 +114,44 @@ jobs:
           echo "✅ 所有文章验证通过"
 
       - name: Build and deploy
+        id: deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           git config --global user.name "theman6660"
           git config --global user.email "theman6660@users.noreply.github.com"
 
-          # 构建
           npx hexo clean
           npx hexo generate
 
-          # 验证构建产物
           if [ ! -f public/index.html ]; then
             echo "❌ 构建失败：public/index.html 不存在"
             exit 1
           fi
+          if [ ! -s public/index.html ]; then
+            echo "❌ 构建失败：public/index.html 为空"
+            exit 1
+          fi
 
-          # 直接推送到 GitHub Pages repo（不修改 _config.yml）
-          # 比 hexo deploy 更可靠：token 直接注入 URL，不依赖字符串替换
           cd public
           git init
           git checkout -b main
           git add -A
-          now=$(date +%Y-%m-%d)
-          git commit -m "deploy $now" || { echo "无变更，跳过部署"; exit 0; }
-          git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
+
+          if git diff --staged --quiet; then
+            echo "无变更，跳过部署"
+            echo "deployed=false" >> "$GITHUB_OUTPUT"
+          else
+            now=$(date +%Y-%m-%d)
+            git commit -m "deploy $now"
+            git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
+            echo "deployed=true" >> "$GITHUB_OUTPUT"
+            echo "✅ 部署完成"
+          fi
 
       - name: Tag deploy
+        if: steps.deploy.outputs.deployed == 'true'
         run: |
-          now=$(date +%Y-%m-%d-%H%M)
+          now=$(date +%Y-%m-%d-%H%M%S)
           git tag "deploy-$now"
           git push origin "deploy-$now"
