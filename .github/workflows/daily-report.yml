@@ -7,7 +7,6 @@ on:
 
 permissions:
   contents: write
-  workflows: write
 
 concurrency:
   group: daily-deploy
@@ -152,7 +151,9 @@ jobs:
 
       - name: Tag deploy
         if: steps.deploy.outputs.deployed == 'true'
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
           now=$(date +%Y-%m-%d-%H%M%S)
           git tag "deploy-$now"
-          git push origin "deploy-$now"
+          git push "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/beifen.git" "deploy-$now"
