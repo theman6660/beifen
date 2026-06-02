@@ -3,11 +3,11 @@
 ## Source: https://github.com/hexojs/hexo/
 
 # Site
-title: Hexo
+title: 韩小凡的小站
 subtitle: ''
-description: ''
-keywords:
-author: John Doe
+description: '个人博客 - 技术、思考与日常'
+keywords: 技术,编程,AI,个人博客
+author: 韩小凡
 language: zh-CN
 timezone: ''
 

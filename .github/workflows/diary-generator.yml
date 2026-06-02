@@ -20,15 +20,14 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install script dependencies
-        run: npm ci
-        working-directory: hexo-scripts
+      - name: Install dependencies
+        run: npm install
 
       - name: Generate Diary
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: node hexo-scripts/diary-generator.js
-        timeout-minutes: 5
+        run: node diary-generator.js
+        timeout-minutes: 10
 
       - name: Commit and push
         run: |

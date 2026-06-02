@@ -5,3 +5,8 @@ db.json
 node_modules/
 public/
 .deploy*/
+hexo-scripts/
+# 临时文件 — 不要提交草稿和测试图片
+agent-report*.md
+test_*.png
+count_chars.py
