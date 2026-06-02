@@ -39,6 +39,30 @@ const parser = new RSSParser({
 const HEXO_DIR = process.env.HEXO_DIR || '.';
 const RSSHUB_URL = (process.env.RSSHUB_URL || '').trim().replace(/\/$/, '');
 
+// ============ 北京时间工具函数 ============
+function beijingNow() {
+  const now = new Date();
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+}
+
+function beijingDateParts(d) {
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function beijingDateISO(d) {
+  const p = beijingDateParts(d);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
+function beijingDateCN(d) {
+  const p = beijingDateParts(d);
+  return `${p.year}年${p.month}月${p.day}日`;
+}
+
 // ============ RSS源 ============
 const DIRECT_SOURCES = [
   { url: 'https://sspai.com/feed', name: '少数派' },
@@ -72,11 +96,11 @@ function getAllSources() {
 }
 
 // ============ RSS抓取 ============
-async function fetchNews() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(yesterday.getDate() - 1);
+async function fetchNews(targetDate) {
+  const t = targetDate || beijingNow();
+  const bjToday = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
+  const yesterday = new Date(bjToday);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
 
   const allItems = [];
   const sources = getAllSources();
@@ -220,16 +244,12 @@ function parseArgs() {
 // ============ 主流程 ============
 async function main() {
   const { noDeploy, daysAgo } = parseArgs();
-  const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() - daysAgo);
+  const bjNow = beijingNow();
+  const targetDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()));
+  targetDate.setUTCDate(targetDate.getUTCDate() - daysAgo);
 
-  if (isNaN(targetDate.getTime())) {
-    console.error('错误: 日期计算出错');
-    process.exit(1);
-  }
-
-  const dateStrCN = `${targetDate.getFullYear()}年${targetDate.getMonth() + 1}月${targetDate.getDate()}日`;
-  const dateISO = `${targetDate.getFullYear()}-${String(targetDate.getMonth() + 1).padStart(2, '0')}-${String(targetDate.getDate()).padStart(2, '0')}`;
+  const dateStrCN = beijingDateCN(targetDate);
+  const dateISO = beijingDateISO(targetDate);
 
   console.log('========================================');
   console.log('  社会思想日报生成器');
@@ -237,7 +257,7 @@ async function main() {
   console.log('========================================\n');
 
   console.log('[步骤1] 抓取社会新闻...');
-  const newsItems = await fetchNews();
+  const newsItems = await fetchNews(targetDate);
   console.log(`\n共获取 ${newsItems.length} 条新闻\n`);
 
   if (newsItems.length === 0) {

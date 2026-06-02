@@ -24,6 +24,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
@@ -39,6 +40,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
+          # 先拉取远程变更，再 staging（避免冲突时丢失生成的日记）
+          git pull --rebase || echo "⚠️ 拉取远程失败，将直接推送"
+
           diary_generated=false
           shopt -s nullglob
           for f in source/_posts/diary-*.md; do
@@ -53,9 +57,6 @@ jobs:
             echo "无变更，跳过提交"
             exit 0
           fi
-
-          # 先拉取远程、再推送（拉取失败不阻塞提交流程）
-          git pull --rebase || echo "⚠️ 拉取远程失败，将直接推送"
 
           if [ "$diary_generated" = true ]; then
             git commit -m "docs: 日记 $(date +%Y-%m-%d)"

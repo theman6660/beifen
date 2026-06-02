@@ -132,8 +132,13 @@ async function fetchNews() {
 async function generateReport(newsItems) {
   const dateStrCN = beijingDateCN();
   const dateISO = beijingDateISO();
+  const MAX_NEWS = 30;
 
-  const newsText = newsItems.map((item, i) =>
+  if (newsItems.length > MAX_NEWS) {
+    console.log(`[提示] 新闻共 ${newsItems.length} 条，取前 ${MAX_NEWS} 条用于生成`);
+  }
+
+  const newsText = newsItems.slice(0, MAX_NEWS).map((item, i) =>
     `${i + 1}. [${item.source}] ${item.title}\n   链接: ${item.link}\n   摘要: ${item.snippet}`
   ).join('\n\n');
 
@@ -336,7 +341,6 @@ ${report}
 
   fs.writeFileSync(filePath, hexoContent, 'utf-8');
   console.log(`[发布] 已生成: ${fileName}`);
-  if (noDeploy) return;
 }
 
 // ============ 主流程 ============
@@ -393,7 +397,7 @@ async function main() {
       });
       console.log('[部署] 完成！');
     } catch (err) {
-      console.error('[部署] 失败:', err.message);
+      console.error('[部署] 失败:', err.message || String(err));
       process.exit(1);
     }
   }

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const OpenAI = require('openai');
@@ -5,6 +6,17 @@ const OpenAI = require('openai');
 const HEXO_DIR = __dirname;
 const SNIPPETS_DIR = path.join(HEXO_DIR, 'data', 'snippets');
 const POSTS_DIR = path.join(HEXO_DIR, 'source', '_posts');
+
+// ============ 北京时间工具函数 ============
+function beijingNow() {
+  const now = new Date();
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+}
+
+function beijingTodayStr() {
+  const bj = beijingNow();
+  return `${bj.getUTCFullYear()}-${String(bj.getUTCMonth() + 1).padStart(2, '0')}-${String(bj.getUTCDate()).padStart(2, '0')}`;
+}
 
 // 启动时验证必需的环境变量
 if (!process.env.DEEPSEEK_API_KEY) {
@@ -20,8 +32,7 @@ const client = new OpenAI({
 });
 
 function getTodayStr() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return beijingTodayStr();
 }
 
 function getDateStrCN(dateStr) {
@@ -102,7 +113,7 @@ ${snippetsText}
 
   console.log('[DeepSeek] 正在生成日记...');
   const response = await client.chat.completions.create({
-    model: 'deepseek-v4-pro',
+    model: process.env.MODEL || 'deepseek-v4-pro',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1500,

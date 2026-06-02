@@ -31,7 +31,12 @@ jobs:
         with:
           name: ai-posts
           path: source/_posts/ai-daily-*.md
-          if-no-files-found: error
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-chronicle
+          path: source/_posts/ai-chronicle.md
+          if-no-files-found: warn
 
   society-daily:
     runs-on: ubuntu-latest
@@ -52,7 +57,7 @@ jobs:
         with:
           name: society-posts
           path: source/_posts/society-daily-*.md
-          if-no-files-found: error
+          if-no-files-found: warn
 
   deploy:
     needs: [ai-daily, society-daily]
@@ -74,6 +79,9 @@ jobs:
         continue-on-error: true
       - uses: actions/download-artifact@v4
         with: { name: society-posts, path: source/_posts/ }
+        continue-on-error: true
+      - uses: actions/download-artifact@v4
+        with: { name: ai-chronicle, path: source/_posts/ }
         continue-on-error: true
 
       - name: Validate frontmatter
@@ -147,6 +155,22 @@ jobs:
             git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
             echo "deployed=true" >> "$GITHUB_OUTPUT"
             echo "✅ 部署完成"
+          fi
+
+      - name: Commit chronicle
+        if: steps.deploy.outputs.deployed == 'true'
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          git add source/_posts/ai-chronicle.md 2>/dev/null || true
+          if git diff --staged --quiet; then
+            echo "编年史无变更"
+          else
+            git config user.name "theman6660"
+            git config user.email "theman6660@users.noreply.github.com"
+            git commit -m "docs: 更新 AI 编年史 $(date +%Y-%m-%d)"
+            git push "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/beifen.git" main
+            echo "✅ 编年史已提交"
           fi
 
       - name: Tag deploy
