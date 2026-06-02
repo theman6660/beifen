@@ -39,24 +39,27 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 先拉取最新代码，再提交（避免 rebase 冲突丢数据）
-          git pull --rebase
-
           diary_generated=false
           shopt -s nullglob
           for f in source/_posts/diary-*.md; do
             git add "$f"
             diary_generated=true
           done
+          shopt -u nullglob
 
           git add data/snippets/ 2>/dev/null || true
 
           if git diff --staged --quiet; then
             echo "无变更，跳过提交"
-          elif $diary_generated; then
+            exit 0
+          fi
+
+          # 先拉取远程、再推送（拉取失败不阻塞提交流程）
+          git pull --rebase || echo "⚠️ 拉取远程失败，将直接推送"
+
+          if [ "$diary_generated" = true ]; then
             git commit -m "docs: 日记 $(date +%Y-%m-%d)"
-            git push
           else
             git commit -m "chore: 更新 snippets $(date +%Y-%m-%d)"
-            git push
           fi
+          git push
