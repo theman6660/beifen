@@ -17,18 +17,19 @@ if (PROXY_URL) {
   }
 }
 
-// 启动时验证必需环境变量
-['AUTH_TOKEN', 'BASE_URL', 'MODEL'].forEach(key => {
-  if (!process.env[key]) {
-    console.error(`错误: 环境变量 ${key} 未设置`);
-    process.exit(1);
-  }
-});
+const API_KEY = (process.env.AUTH_TOKEN || process.env.DEEPSEEK_API_KEY || '').trim();
+const BASE_URL = (process.env.BASE_URL || 'https://api.deepseek.com').trim();
+const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
+
+if (!API_KEY) {
+  console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
+  process.exit(1);
+}
 
 const client = new OpenAI({
-  apiKey: process.env.AUTH_TOKEN,
-  baseURL: process.env.BASE_URL,
-  timeout: 90000,
+  apiKey: API_KEY,
+  baseURL: BASE_URL,
+  timeout: 180000,
   maxRetries: 2,
 });
 
@@ -148,28 +149,57 @@ async function generateReport(newsItems) {
 ${newsText}
 
 要求：
-1. 标题：AI行业日报 - ${dateStrCN}
-2. 结构：
-   - 今日要闻（最重要的2-3条新闻，详细分析）
-   - 行业动态（其他值得关注的新闻，简要概述）
-   - 技术进展（新技术、新模型、新论文）
-   - 商业动态（融资、收购、产品发布）
-   - 政策与监管（相关政策变化）
-   - 影响分析（这些变化对行业、就业、社会的影响）
-3. 风格：专业但易懂，有深度分析，不是简单罗列
-4. 如果某个分类没有相关新闻，跳过该分类
-5. 总字数控制在1500-2500字
-6. 直接输出文章内容，不要加markdown代码块标记`;
+1. 不要输出文章总标题，标题会由 Hexo frontmatter 提供
+2. 使用 Markdown 二级标题组织结构，例如：
+   ## 今日要闻
+   ### 1. 重要新闻标题
+   ## 行业动态
+   ## 技术进展
+   ## 商业动态
+   ## 政策与监管
+   ## 影响分析
+3. 今日要闻选择最重要的2-3条新闻并详细分析
+4. 风格：专业但易懂，有深度分析，不是简单罗列
+5. 如果某个分类没有相关新闻，跳过该分类
+6. 总字数控制在1500-2500字
+7. 不要编造来源；不要输出参考来源列表，脚本会自动追加
+8. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await client.chat.completions.create({
-    model: process.env.MODEL,
+    model: MODEL,
     max_tokens: 4000,
     messages: [{ role: 'user', content: prompt }],
   });
 
   const content = response?.choices?.[0]?.message?.content;
   return content?.trim() || '';
+}
+
+function normalizeReport(report, title) {
+  return report
+    .replace(/^```(?:markdown)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .split(/\r?\n/)
+    .filter((line, index) => !(index === 0 && line.trim() === title))
+    .join('\n')
+    .trim();
+}
+
+function buildSourceList(newsItems, maxSources = 20) {
+  const seen = new Set();
+  const sources = [];
+  for (const item of newsItems) {
+    if (!item.link) continue;
+    const key = `${item.title}|${item.link}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    sources.push(`- [${item.source}] [${item.title}](${item.link})`);
+    if (sources.length >= maxSources) break;
+  }
+
+  if (sources.length === 0) return '';
+  return `\n\n## 参考来源\n\n${sources.join('\n')}`;
 }
 
 // ============ 编年史更新 ============
@@ -229,7 +259,7 @@ ${newsText}
   try {
     console.log('[编年史] 分析今日新闻...');
     const response = await client.chat.completions.create({
-      model: process.env.MODEL,
+      model: MODEL,
       max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
     });
@@ -318,7 +348,7 @@ ${newsText}
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStrCN, dateISO, noDeploy = false) {
+function publishToHexo(report, dateStrCN, dateISO, newsItems, noDeploy = false) {
   const postsDir = path.join(HEXO_DIR, 'source', '_posts');
   if (!fs.existsSync(postsDir)) {
     fs.mkdirSync(postsDir, { recursive: true });
@@ -328,14 +358,18 @@ function publishToHexo(report, dateStrCN, dateISO, noDeploy = false) {
   const fileName = `ai-daily-${dateISO}.md`;
   const filePath = path.join(postsDir, fileName);
 
+  const title = `AI行业日报 - ${dateStrCN}`;
+  const normalizedReport = normalizeReport(report, title);
+  const sourceList = buildSourceList(newsItems);
+
   const hexoContent = `---
-title: AI行业日报 - ${dateStrCN}
+title: ${title}
 date: ${dateISO} 08:00:00
 categories: [AI日报]
 tags: [AI, 行业日报, 科技新闻]
 ---
 
-${report}
+${normalizedReport}${sourceList}
 `;
 
   fs.writeFileSync(filePath, hexoContent, 'utf-8');
@@ -374,7 +408,7 @@ async function main() {
 
   // 3. 发布到Hexo
   console.log('\n[步骤3] 写入文章...\n');
-  publishToHexo(report, dateStrCN, dateISO, noDeploy);
+  publishToHexo(report, dateStrCN, dateISO, newsItems, noDeploy);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
