@@ -43,6 +43,10 @@ const RSSHUB_URL = (process.env.RSSHUB_URL || '').trim().replace(/\/$/, '');
 
 // ============ 北京时间工具函数 ============
 function beijingNow() {
+  if (process.env.BJ_DATE) {
+    const [y, m, d] = process.env.BJ_DATE.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  }
   const now = new Date();
   return new Date(now.getTime() + 8 * 60 * 60 * 1000);
 }

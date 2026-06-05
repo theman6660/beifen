@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'npm' }
+        with: { node-version: '22', cache: 'npm' }
       - run: npm install
       - name: Compute Beijing date
         id: bj-date
@@ -30,12 +30,13 @@ jobs:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           BASE_URL: https://api.deepseek.com
           MODEL: deepseek-v4-pro
+          BJ_DATE: ${{ steps.bj-date.outputs.date }}
         run: node ai-daily.js --no-deploy
       - uses: actions/upload-artifact@v4
         with:
           name: ai-posts
           path: source/_posts/ai-daily-${{ steps.bj-date.outputs.date }}.md
-          if-no-files-found: error
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         with:
           name: ai-chronicle
@@ -48,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'npm' }
+        with: { node-version: '22', cache: 'npm' }
       - run: npm install
       - name: Compute Beijing date
         id: bj-date
@@ -60,12 +61,13 @@ jobs:
           BASE_URL: https://api.deepseek.com
           MODEL: deepseek-v4-pro
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
+          BJ_DATE: ${{ steps.bj-date.outputs.date }}
         run: node society-daily.js --no-deploy
       - uses: actions/upload-artifact@v4
         with:
           name: society-posts
           path: source/_posts/society-daily-${{ steps.bj-date.outputs.date }}.md
-          if-no-files-found: error
+          if-no-files-found: warn
 
   deploy:
     needs: [ai-daily, society-daily]
@@ -78,12 +80,15 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'npm' }
+        with: { node-version: '22', cache: 'npm' }
 
       - run: npm install
 
       - name: Sync source branch
-        run: git pull --rebase origin main
+        run: |
+          git stash --include-untracked 2>/dev/null || true
+          git pull --rebase origin main
+          git stash pop 2>/dev/null || true
 
       - uses: actions/download-artifact@v4
         with: { name: ai-posts, path: source/_posts/ }
