@@ -80,6 +80,46 @@ const RSS_SOURCES_CN = [
   { url: 'https://sspai.com/feed', name: '少数派' },
 ];
 
+const CN_SOURCES = new Set(RSS_SOURCES_CN.map(source => source.name));
+
+function selectWithSourceCap(items, limit, maxPerSource, exclude = new Set()) {
+  const counts = new Map();
+  const selected = [];
+
+  for (const item of items) {
+    const key = `${item.title}|${item.link}`;
+    if (exclude.has(key)) continue;
+
+    const count = counts.get(item.source) || 0;
+    if (count >= maxPerSource) continue;
+
+    selected.push(item);
+    exclude.add(key);
+    counts.set(item.source, count + 1);
+
+    if (selected.length >= limit) break;
+  }
+
+  return selected;
+}
+
+function selectNewsForPrompt(newsItems, maxNews = 30) {
+  const internationalItems = newsItems.filter(item => !CN_SOURCES.has(item.source));
+  const cnItems = newsItems.filter(item => CN_SOURCES.has(item.source));
+  const selectedKeys = new Set();
+
+  const selected = selectWithSourceCap(internationalItems, Math.min(18, maxNews), 5, selectedKeys);
+  selected.push(...selectWithSourceCap(cnItems, maxNews - selected.length, 4, selectedKeys));
+
+  if (selected.length < maxNews) {
+    selected.push(...selectWithSourceCap(newsItems, maxNews - selected.length, 5, selectedKeys));
+  }
+
+  selected.sort((a, b) => b._timestamp - a._timestamp);
+  console.log(`[取样] 用于生成: ${selected.length} 条（国际 ${selected.filter(item => !CN_SOURCES.has(item.source)).length}，中文 ${selected.filter(item => CN_SOURCES.has(item.source)).length}）`);
+  return selected.slice(0, maxNews);
+}
+
 // ============ RSS抓取 ============
 async function fetchNews() {
   const bj = beijingNow();
@@ -399,7 +439,8 @@ async function main() {
 
   // 2. 生成报告
   console.log('[步骤2] 生成行业报告...\n');
-  const report = await generateReport(newsItems);
+  const promptNewsItems = selectNewsForPrompt(newsItems);
+  const report = await generateReport(promptNewsItems);
 
   if (!report) {
     console.log('[跳过] LLM 未返回内容');
@@ -408,7 +449,7 @@ async function main() {
 
   // 3. 发布到Hexo
   console.log('\n[步骤3] 写入文章...\n');
-  publishToHexo(report, dateStrCN, dateISO, newsItems, noDeploy);
+  publishToHexo(report, dateStrCN, dateISO, promptNewsItems, noDeploy);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
