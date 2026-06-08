@@ -29,6 +29,12 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Pull latest changes
+        run: |
+          git stash --include-untracked 2>/dev/null || true
+          git pull --rebase origin main
+          git stash pop 2>/dev/null || true
+
       - name: Generate Diary
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -39,9 +45,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # 先拉取远程变更，再 staging（避免冲突时丢失生成的日记）
-          git pull --rebase || echo "⚠️ 拉取远程失败，将直接推送"
 
           diary_generated=false
           shopt -s nullglob

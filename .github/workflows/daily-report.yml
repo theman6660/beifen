@@ -15,7 +15,7 @@ concurrency:
 jobs:
   ai-daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -45,7 +45,7 @@ jobs:
 
   society-daily:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -100,11 +100,35 @@ jobs:
         with: { name: ai-chronicle, path: source/_posts/ }
         continue-on-error: true
 
-      - name: Validate frontmatter
+      - name: Compute Beijing date
+        id: bj-deploy
+        run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: Check today's files exist
+        id: check-today
         run: |
-          echo "=== 检查新生成文章的 frontmatter ==="
+          AI="source/_posts/ai-daily-${{ steps.bj-deploy.outputs.date }}.md"
+          SOC="source/_posts/society-daily-${{ steps.bj-deploy.outputs.date }}.md"
+          CHR="source/_posts/ai-chronicle.md"
+          FOUND=""
+          [ -f "$AI" ] && FOUND="$FOUND ai-daily"
+          [ -f "$SOC" ] && FOUND="$FOUND society-daily"
+          [ -f "$CHR" ] && FOUND="$FOUND chronicle"
+          if [ -z "$FOUND" ]; then
+            echo "⚠️ 今天没有任何日报文件生成，跳过提交/部署"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "📄 今天生成的文件: $FOUND"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate today's frontmatter
+        if: steps.check-today.outputs.skip == 'false'
+        run: |
+          echo "=== 检查今日文章的 frontmatter ==="
+          DATE="${{ steps.bj-deploy.outputs.date }}"
           errors=0
-          for f in source/_posts/ai-daily-*.md source/_posts/society-daily-*.md; do
+          for f in "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md"; do
             [ -f "$f" ] || continue
             echo "检查: $f"
             fm=$(sed -n '/^---$/,/^---$/p' "$f")
@@ -135,24 +159,27 @@ jobs:
             echo "❌ 验证失败，$errors 个错误，中止部署"
             exit 1
           fi
-          echo "✅ 所有文章验证通过"
+          echo "✅ 今日文章验证通过"
 
       - name: Commit generated posts
+        if: steps.check-today.outputs.skip == 'false'
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
-          git add source/_posts/ai-daily-*.md source/_posts/society-daily-*.md source/_posts/ai-chronicle.md 2>/dev/null || true
+          DATE="${{ steps.bj-deploy.outputs.date }}"
+          git add "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md" source/_posts/ai-chronicle.md 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "生成文章无变更"
           else
             git config user.name "theman6660"
             git config user.email "theman6660@users.noreply.github.com"
-            git commit -m "docs: 更新日报 $(TZ=Asia/Shanghai date +%Y-%m-%d)"
+            git commit -m "docs: 更新日报 $DATE"
             git push "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/beifen.git" main
             echo "✅ 生成文章已提交到源仓库"
           fi
 
       - name: Build and deploy
+        if: steps.check-today.outputs.skip == 'false'
         id: deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
