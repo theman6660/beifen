@@ -303,6 +303,10 @@ ${report.slice(0, 3000)}`;
 
     const result = response?.choices?.[0]?.message?.content?.trim() || '';
     console.log(`[质检] 结果: ${result}`);
+    if (!result) {
+      console.log('[质检] 模型返回空内容，默认通过');
+      return { pass: true, reason: '模型返回空，默认通过' };
+    }
     return { pass: result.startsWith('PASS'), reason: result };
   } catch (err) {
     console.log(`[质检] 评估失败，默认通过: ${err.message}`);
@@ -365,7 +369,7 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
   }
 
   console.log('[质检] 所有重试未通过，返回最后一次结果');
-  return '';
+  return bestReport || lastReport || '';
 }
 
 function normalizeReport(report, title) {
