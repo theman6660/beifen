@@ -521,7 +521,7 @@ process.on('unhandledRejection', (reason) => {
   process.exit(1);
 });
 
-main().catch(err => {
+main().then(() => process.exit(0)).catch(err => {
   console.error('运行失败:', err.stack || err.message || String(err));
   process.exit(1);
 });
