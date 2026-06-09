@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: daily-deploy
+  group: site-content-push
   cancel-in-progress: false
 
 jobs:
@@ -71,7 +71,7 @@ jobs:
 
   deploy:
     needs: [ai-daily, society-daily]
-    if: always() && !cancelled() && (needs.ai-daily.result == 'success' || needs.society-daily.result == 'success')
+    if: always() && !cancelled() && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -137,7 +137,7 @@ jobs:
                 ok=false
               fi
             done
-            bad=$(echo "$fm" | grep -P '^[a-zA-Z_-]+:[^ \n]' || true)
+            bad=$(echo "$fm" | grep -E '^[A-Za-z_-]+:[^[:space:]]' || true)
             if [ -n "$bad" ]; then
               echo "  ❌ YAML 字段格式错误（冒号后缺空格）: $bad"
               errors=$((errors + 1))
