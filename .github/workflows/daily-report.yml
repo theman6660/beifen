@@ -2,7 +2,7 @@ name: Daily Report Pipeline
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 北京时间 8:00
+    - cron: '17 0 * * *'  # 北京时间 8:17，避开整点高峰
   workflow_dispatch:
 
 permissions:
@@ -17,10 +17,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with: { node-version: '22', cache: 'npm' }
-      - run: npm install
+      - run: npm ci
       - name: Compute Beijing date
         id: bj-date
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
@@ -32,12 +32,12 @@ jobs:
           MODEL: deepseek-v4-pro
           BJ_DATE: ${{ steps.bj-date.outputs.date }}
         run: node ai-daily.js --no-deploy
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ai-posts
           path: source/_posts/ai-daily-${{ steps.bj-date.outputs.date }}.md
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
         with:
           name: ai-chronicle
           path: source/_posts/ai-chronicle.md
@@ -47,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with: { node-version: '22', cache: 'npm' }
-      - run: npm install
+      - run: npm ci
       - name: Compute Beijing date
         id: bj-date
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
@@ -63,11 +63,11 @@ jobs:
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
           BJ_DATE: ${{ steps.bj-date.outputs.date }}
         run: node society-daily.js --no-deploy
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: society-posts
           path: source/_posts/society-daily-${{ steps.bj-date.outputs.date }}.md
-          if-no-files-found: warn
+          if-no-files-found: error
 
   deploy:
     needs: [ai-daily, society-daily]
@@ -75,14 +75,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with: { node-version: '22', cache: 'npm' }
 
-      - run: npm install
+      - run: npm ci
 
       - name: Sync source branch
         run: |
@@ -90,13 +90,11 @@ jobs:
           git pull --rebase origin main
           git stash pop 2>/dev/null || true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: ai-posts, path: source/_posts/ }
-        continue-on-error: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: society-posts, path: source/_posts/ }
-        continue-on-error: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with: { name: ai-chronicle, path: source/_posts/ }
         continue-on-error: true
 
@@ -105,25 +103,19 @@ jobs:
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
 
       - name: Check today's files exist
-        id: check-today
         run: |
           AI="source/_posts/ai-daily-${{ steps.bj-deploy.outputs.date }}.md"
           SOC="source/_posts/society-daily-${{ steps.bj-deploy.outputs.date }}.md"
-          CHR="source/_posts/ai-chronicle.md"
           FOUND=""
           [ -f "$AI" ] && FOUND="$FOUND ai-daily"
           [ -f "$SOC" ] && FOUND="$FOUND society-daily"
-          [ -f "$CHR" ] && FOUND="$FOUND chronicle"
           if [ -z "$FOUND" ]; then
-            echo "⚠️ 今天没有任何日报文件生成，跳过提交/部署"
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "📄 今天生成的文件: $FOUND"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "❌ 今天没有任何日报文件生成，中止部署"
+            exit 1
           fi
+          echo "📄 今天生成的文件: $FOUND"
 
       - name: Validate today's frontmatter
-        if: steps.check-today.outputs.skip == 'false'
         run: |
           echo "=== 检查今日文章的 frontmatter ==="
           DATE="${{ steps.bj-deploy.outputs.date }}"
@@ -162,7 +154,6 @@ jobs:
           echo "✅ 今日文章验证通过"
 
       - name: Commit generated posts
-        if: steps.check-today.outputs.skip == 'false'
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
@@ -179,7 +170,6 @@ jobs:
           fi
 
       - name: Build and deploy
-        if: steps.check-today.outputs.skip == 'false'
         id: deploy
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}

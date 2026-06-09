@@ -214,7 +214,7 @@ async function fetchNews(targetDate) {
 }
 
 // ============ 生成日报 ============
-async function generateReport(newsItems, dateStr) {
+async function generateReport(newsItems) {
   const MAX_NEWS = 30;
   const truncated = newsItems.length > MAX_NEWS;
   if (truncated) {
@@ -350,7 +350,7 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
-    const report = await generateReport(promptNewsItems, dateStrCN);
+    const report = await generateReport(promptNewsItems);
     if (!report) {
       console.log('[生成] 空内容，重试...');
       continue;
