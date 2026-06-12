@@ -189,6 +189,15 @@ jobs:
             exit 1
           fi
 
+          remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
+          local_head=$(git rev-parse HEAD)
+          if [ "$remote_head" != "$local_head" ]; then
+            echo "❌ 源仓库 main 已在本次构建后发生变化，中止部署，避免用过时构建覆盖 Pages"
+            echo "Remote main: $remote_head"
+            echo "Local HEAD:  $local_head"
+            exit 1
+          fi
+
           cd public
           git init
           git checkout -b main

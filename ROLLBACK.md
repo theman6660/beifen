@@ -24,14 +24,13 @@
 cd D:\code\personal-website
 git fetch --tags origin
 git log --oneline --decorate -20
-git revert <坏提交ID>
-git push origin main
-npm run clean
+git revert --no-commit <坏提交ID>
 npm run build
-npm run deploy
+git commit -m "revert: undo <坏提交ID>"
+git push origin main
 ```
 
-`git revert` 会新增一个“撤销提交”，不改写历史，适合和自动 workflow 共存。
+`git revert --no-commit` 会先把撤销结果放在工作区，构建通过后再提交，不改写历史，适合和自动 workflow 共存。推送源码后，到 GitHub Actions 运行 `Manual Site Redeploy`，`ref` 填 `main`，让 CI 从源码重新生成 Pages。
 
 ## 3. 回到某个成功部署标签
 
@@ -49,14 +48,39 @@ git tag --list "deploy-*" --sort=-creatordate
 
 ```powershell
 git revert --no-commit deploy-2026-06-12-050556..HEAD
+npm run build
 git commit -m "revert: rollback site to deploy-2026-06-12-050556"
 git push origin main
-npm run clean
-npm run build
-npm run deploy
 ```
 
-注意：这个方法会撤销标签之后的源码变化。如果标签之后有你想保留的新文章，先把那些文章另存或单独挑回来。
+然后到 GitHub Actions 运行 `Manual Site Redeploy`，`ref` 填 `main`。
+
+注意：这个方法会撤销标签之后的源码变化。如果标签之后有你想保留的新文章，不要靠手动另存，按下面的方式从回退前分支挑回来。
+
+```powershell
+cd D:\code\personal-website
+git fetch --tags origin
+
+# 先给当前状态做一个临时救援分支，里面保留所有回退前内容
+git branch rescue-before-rollback
+
+# 回退到某个成功部署标签之后的状态差异
+git revert --no-commit deploy-2026-06-12-050556..HEAD
+
+# 从救援分支把要保留的文章拿回来，可以重复执行多次
+git restore --source=rescue-before-rollback -- source/_posts/想保留的文章.md
+
+npm run build
+git add source/_posts/想保留的文章.md
+git commit -m "revert: rollback site while keeping selected posts"
+git push origin main
+```
+
+确认不再需要救援分支后，可以删除：
+
+```powershell
+git branch -D rescue-before-rollback
+```
 
 ## 4. 用 GitHub Actions 手动重部署
 
@@ -73,35 +97,33 @@ npm run deploy
    - `deploy-2026-06-12-050556`
    - 某个 commit SHA
 6. `reason` 写一句原因，例如 `rollback after broken style`
+7. 如果 `ref` 不是 `main`，在 `confirm` 里输入：
+   ```text
+   overwrite-pages
+   ```
 
 这个 workflow 只做三件事：
 
 1. 检出指定源码版本
 2. 运行 `npm ci`、`hexo clean`、`hexo generate`
-3. 把 `public/` 强推到 `theman6660.github.io:main`
+3. 通过最新性/确认门禁后，把 `public/` 强推到 `theman6660.github.io:main`
 
 它不会生成日报，也不会改 `beifen` 源码。
 
 ## 5. 本地手动重新部署当前源码
 
-适合：你在本机确认源码没问题，只想把当前版本重新发布。
+不建议在本地直接 `npm run deploy` 推 Pages。推荐路径是：本地只负责修改源码、构建验证、提交推送；线上发布交给 GitHub Actions。
 
 ```powershell
 cd D:\code\personal-website
-$env:HTTP_PROXY="http://127.0.0.1:7892"
-$env:HTTPS_PROXY="http://127.0.0.1:7892"
-npm run clean
 npm run build
-npm run deploy
+git status --short
+git add <改动文件>
+git commit -m "docs: ..."
+git push origin main
 ```
 
-部署前至少确认：
-
-```powershell
-Test-Path .\public\index.html
-```
-
-如果返回 `False`，不要部署。
+推送后，到 GitHub Actions 运行 `Manual Site Redeploy`，`ref` 填 `main`。这样 Pages 始终由 CI 从 `beifen` 源码重建，不让本地直接覆盖线上生成物。
 
 ## 6. 出事时不要做的事
 
@@ -109,6 +131,7 @@ Test-Path .\public\index.html
 - 不要把 `theman6660.github.io` 当作源码备份。
 - 不要在有未提交文章时随便切标签或回退。
 - 不要在日报脚本还失败时反复部署 Pages，先修源码。
+- 不要把本地 `npm run deploy` 当作常规恢复路径；恢复应从源码提交和 Actions 重建开始。
 
 ## 7. 日常预防习惯
 
