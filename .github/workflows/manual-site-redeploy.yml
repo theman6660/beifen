@@ -1,0 +1,87 @@
+name: Manual Site Redeploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Source ref to deploy: main, deploy-* tag, or commit SHA"
+        required: true
+        default: "main"
+      reason:
+        description: "Why redeploying or rolling back"
+        required: false
+        default: "manual recovery"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-content-push
+  cancel-in-progress: false
+
+jobs:
+  redeploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout requested source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        run: |
+          npx hexo clean
+          npx hexo generate
+
+          if [ ! -f public/index.html ]; then
+            echo "Build failed: public/index.html does not exist"
+            exit 1
+          fi
+
+          if [ ! -s public/index.html ]; then
+            echo "Build failed: public/index.html is empty"
+            exit 1
+          fi
+
+      - name: Deploy generated site
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          SOURCE_REF: ${{ inputs.ref }}
+        run: |
+          : "${DEPLOY_TOKEN:?DEPLOY_TOKEN secret is required}"
+
+          git config --global user.name "theman6660"
+          git config --global user.email "theman6660@users.noreply.github.com"
+
+          cd public
+          git init
+          git checkout -b main
+          git add -A
+
+          stamp=$(date -u +%Y-%m-%d-%H%M%S)
+          git commit -m "redeploy ${SOURCE_REF} ${stamp}"
+          git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
+
+      - name: Summarize
+        env:
+          SOURCE_REF: ${{ inputs.ref }}
+          REDEPLOY_REASON: ${{ inputs.reason }}
+        run: |
+          {
+            echo "### Manual redeploy complete"
+            echo ""
+            echo "- Source ref: \`${SOURCE_REF}\`"
+            echo "- Reason: ${REDEPLOY_REASON}"
+            echo "- Target: \`theman6660/theman6660.github.io:main\`"
+          } >> "$GITHUB_STEP_SUMMARY"
