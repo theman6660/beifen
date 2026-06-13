@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '17 0 * * *'  # 北京时间 8:17，避开整点高峰
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Regenerate today's posts even if they already exist"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -13,7 +19,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    outputs:
+      date: ${{ steps.bj-date.outputs.date }}
+      should_run: ${{ steps.guard.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compute Beijing date
+        id: bj-date
+        run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
+      - name: Decide whether to generate
+        id: guard
+        env:
+          FORCE_RUN: ${{ inputs.force || 'false' }}
+          DATE: ${{ steps.bj-date.outputs.date }}
+        run: |
+          AI="source/_posts/ai-daily-$DATE.md"
+          SOC="source/_posts/society-daily-$DATE.md"
+          if [ "$FORCE_RUN" = "true" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "🔁 force=true，重新生成今日日报"
+          elif [ -f "$AI" ] && [ -f "$SOC" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 今日日报已存在，跳过重复定时生成: $AI, $SOC"
+          else
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "📄 今日日报尚未齐全，开始生成"
+          fi
+
   ai-daily:
+    needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -21,21 +58,18 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
-      - name: Compute Beijing date
-        id: bj-date
-        run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
       - name: Generate AI Daily
         env:
           AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           BASE_URL: https://api.deepseek.com
           MODEL: deepseek-v4-pro
-          BJ_DATE: ${{ steps.bj-date.outputs.date }}
+          BJ_DATE: ${{ needs.preflight.outputs.date }}
         run: node ai-daily.js --no-deploy
       - uses: actions/upload-artifact@v7
         with:
           name: ai-posts
-          path: source/_posts/ai-daily-${{ steps.bj-date.outputs.date }}.md
+          path: source/_posts/ai-daily-${{ needs.preflight.outputs.date }}.md
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
@@ -44,6 +78,8 @@ jobs:
           if-no-files-found: warn
 
   society-daily:
+    needs: preflight
+    if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,9 +87,6 @@ jobs:
       - uses: actions/setup-node@v6
         with: { node-version: '22', cache: 'npm' }
       - run: npm ci
-      - name: Compute Beijing date
-        id: bj-date
-        run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
       - name: Generate Society Daily
         env:
           AUTH_TOKEN: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -61,17 +94,17 @@ jobs:
           BASE_URL: https://api.deepseek.com
           MODEL: deepseek-v4-pro
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
-          BJ_DATE: ${{ steps.bj-date.outputs.date }}
+          BJ_DATE: ${{ needs.preflight.outputs.date }}
         run: node society-daily.js --no-deploy
       - uses: actions/upload-artifact@v7
         with:
           name: society-posts
-          path: source/_posts/society-daily-${{ steps.bj-date.outputs.date }}.md
+          path: source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md
           if-no-files-found: error
 
   deploy:
-    needs: [ai-daily, society-daily]
-    if: always() && !cancelled() && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
+    needs: [preflight, ai-daily, society-daily]
+    if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -98,14 +131,10 @@ jobs:
         with: { name: ai-chronicle, path: source/_posts/ }
         continue-on-error: true
 
-      - name: Compute Beijing date
-        id: bj-deploy
-        run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
-
       - name: Check today's files exist
         run: |
-          AI="source/_posts/ai-daily-${{ steps.bj-deploy.outputs.date }}.md"
-          SOC="source/_posts/society-daily-${{ steps.bj-deploy.outputs.date }}.md"
+          AI="source/_posts/ai-daily-${{ needs.preflight.outputs.date }}.md"
+          SOC="source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md"
           FOUND=""
           [ -f "$AI" ] && FOUND="$FOUND ai-daily"
           [ -f "$SOC" ] && FOUND="$FOUND society-daily"
@@ -118,7 +147,7 @@ jobs:
       - name: Validate today's frontmatter
         run: |
           echo "=== 检查今日文章的 frontmatter ==="
-          DATE="${{ steps.bj-deploy.outputs.date }}"
+          DATE="${{ needs.preflight.outputs.date }}"
           errors=0
           for f in "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md"; do
             [ -f "$f" ] || continue
@@ -157,7 +186,7 @@ jobs:
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
         run: |
-          DATE="${{ steps.bj-deploy.outputs.date }}"
+          DATE="${{ needs.preflight.outputs.date }}"
           git add "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md" source/_posts/ai-chronicle.md 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "生成文章无变更"
@@ -198,9 +227,11 @@ jobs:
             exit 1
           fi
 
-          cd public
-          git init
-          git checkout -b main
+          PAGES_DIR="$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$PAGES_DIR"
+          rsync -a --delete --exclude '.git' public/ "$PAGES_DIR"/
+
+          cd "$PAGES_DIR"
           git add -A
 
           if git diff --staged --quiet; then
@@ -209,7 +240,7 @@ jobs:
           else
             now=$(date +%Y-%m-%d)
             git commit -m "deploy $now"
-            git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
+            git push origin main
             echo "deployed=true" >> "$GITHUB_OUTPUT"
             echo "✅ 部署完成"
           fi

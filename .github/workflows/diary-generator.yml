@@ -16,6 +16,8 @@ jobs:
   generate-diary:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -42,6 +44,7 @@ jobs:
         timeout-minutes: 10
 
       - name: Commit and push
+        id: commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -58,6 +61,7 @@ jobs:
 
           if git diff --staged --quiet; then
             echo "无变更，跳过提交"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -67,3 +71,57 @@ jobs:
             git commit -m "chore: 更新 snippets $(date +%Y-%m-%d)"
           fi
           git push
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+  deploy-site:
+    needs: generate-diary
+    if: needs.generate-diary.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Build and deploy
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+        run: |
+          git config --global user.name "theman6660"
+          git config --global user.email "theman6660@users.noreply.github.com"
+
+          npx hexo clean
+          npx hexo generate
+
+          if [ ! -f public/index.html ]; then
+            echo "构建失败：public/index.html 不存在"
+            exit 1
+          fi
+          if [ ! -s public/index.html ]; then
+            echo "构建失败：public/index.html 为空"
+            exit 1
+          fi
+
+          PAGES_DIR="$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$PAGES_DIR"
+          rsync -a --delete --exclude '.git' public/ "$PAGES_DIR"/
+
+          cd "$PAGES_DIR"
+          git add -A
+
+          if git diff --staged --quiet; then
+            echo "无变更，跳过部署"
+          else
+            now=$(date +%Y-%m-%d)
+            git commit -m "deploy diary $now"
+            git push origin main
+            echo "✅ 日记部署完成"
+          fi

@@ -84,14 +84,20 @@ jobs:
             exit 1
           fi
 
-          cd public
-          git init
-          git checkout -b main
+          PAGES_DIR="$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$PAGES_DIR"
+          rsync -a --delete --exclude '.git' public/ "$PAGES_DIR"/
+
+          cd "$PAGES_DIR"
           git add -A
 
-          stamp=$(date -u +%Y-%m-%d-%H%M%S)
-          git commit -m "redeploy ${SOURCE_REF} ${stamp}"
-          git push -f "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" main
+          if git diff --staged --quiet; then
+            echo "No generated output changes; skip redeploy commit."
+          else
+            stamp=$(date -u +%Y-%m-%d-%H%M%S)
+            git commit -m "redeploy ${SOURCE_REF} ${stamp}"
+            git push origin main
+          fi
 
       - name: Summarize
         env:

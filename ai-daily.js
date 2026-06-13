@@ -42,6 +42,33 @@ const parser = new RSSParser({
 const HEXO_DIR = process.env.HEXO_DIR || '.';
 const CHRONICLE_FILE = path.join(HEXO_DIR, 'source', '_posts', 'ai-chronicle.md');
 
+function parseRunMode() {
+  const deploy = process.argv.includes('--deploy');
+  const noDeploy = process.argv.includes('--no-deploy');
+  if (deploy && noDeploy) {
+    console.error('错误: --deploy 和 --no-deploy 不能同时使用');
+    process.exit(1);
+  }
+  return { deploy };
+}
+
+function toGitPath(filePath) {
+  return path.relative(HEXO_DIR, filePath).replace(/\\/g, '/');
+}
+
+function assertNoUnexpectedPostChanges(allowedRelPaths) {
+  const allowed = new Set(allowedRelPaths.map(p => p.replace(/\\/g, '/')));
+  const raw = execSync('git status --porcelain -z -- source/_posts', { cwd: HEXO_DIR });
+  const entries = raw.toString('utf8').split('\0').filter(Boolean)
+    .map(entry => ({ status: entry.slice(0, 2), file: entry.slice(3).replace(/\\/g, '/') }))
+    .filter(entry => entry.file && !allowed.has(entry.file));
+
+  if (entries.length > 0) {
+    const details = entries.map(entry => `${entry.status} ${entry.file}`).join('\n');
+    throw new Error(`拒绝本地部署：source/_posts 中存在非本次生成的本地变更。\n${details}`);
+  }
+}
+
 // ============ 北京时间工具函数 ============
 function beijingNow() {
   if (process.env.BJ_DATE) {
@@ -573,7 +600,7 @@ ${newsText}
 }
 
 // ============ 发布到Hexo ============
-function publishToHexo(report, dateStrCN, dateISO, newsItems, noDeploy = false) {
+function publishToHexo(report, dateStrCN, dateISO, newsItems) {
   const postsDir = path.join(HEXO_DIR, 'source', '_posts');
   if (!fs.existsSync(postsDir)) {
     fs.mkdirSync(postsDir, { recursive: true });
@@ -599,14 +626,15 @@ ${normalizedReport}${sourceList}
 
   fs.writeFileSync(filePath, hexoContent, 'utf-8');
   console.log(`[发布] 已生成: ${fileName}`);
+  return filePath;
 }
 
 // ============ 主流程 ============
 async function main() {
-  const noDeploy = process.argv.includes('--no-deploy');
+  const { deploy } = parseRunMode();
   console.log('========================================');
   console.log('  AI行业日报生成器');
-  if (noDeploy) console.log('  (仅生成，不部署)');
+  if (!deploy) console.log('  (仅生成，不部署；如需本地部署请显式传 --deploy)');
   console.log('========================================\n');
 
   const dateISO = beijingDateISO();
@@ -640,14 +668,15 @@ async function main() {
 
   // 3. 发布到Hexo
   console.log('\n[步骤3] 写入文章...\n');
-  publishToHexo(report, dateStrCN, dateISO, promptNewsItems, noDeploy);
+  const postFile = publishToHexo(report, dateStrCN, dateISO, promptNewsItems);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
   await updateChronicle(newsItems);
 
   // 5. 部署
-  if (!noDeploy) {
+  if (deploy) {
+    assertNoUnexpectedPostChanges([toGitPath(postFile), toGitPath(CHRONICLE_FILE)]);
     console.log('\n[步骤5] 部署网站...\n');
     const env = { ...process.env };
     if (PROXY_URL) {

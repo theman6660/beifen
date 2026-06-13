@@ -42,6 +42,23 @@ const parser = new RSSParser({
 const HEXO_DIR = process.env.HEXO_DIR || '.';
 const RSSHUB_URL = (process.env.RSSHUB_URL || '').trim().replace(/\/$/, '');
 
+function toGitPath(filePath) {
+  return path.relative(HEXO_DIR, filePath).replace(/\\/g, '/');
+}
+
+function assertNoUnexpectedPostChanges(allowedRelPaths) {
+  const allowed = new Set(allowedRelPaths.map(p => p.replace(/\\/g, '/')));
+  const raw = execSync('git status --porcelain -z -- source/_posts', { cwd: HEXO_DIR });
+  const entries = raw.toString('utf8').split('\0').filter(Boolean)
+    .map(entry => ({ status: entry.slice(0, 2), file: entry.slice(3).replace(/\\/g, '/') }))
+    .filter(entry => entry.file && !allowed.has(entry.file));
+
+  if (entries.length > 0) {
+    const details = entries.map(entry => `${entry.status} ${entry.file}`).join('\n');
+    throw new Error(`拒绝本地部署：source/_posts 中存在非本次生成的本地变更。\n${details}`);
+  }
+}
+
 // ============ 北京时间工具函数 ============
 function beijingNow() {
   if (process.env.BJ_DATE) {
@@ -424,11 +441,17 @@ tags: [社会心理, 精神分析, 时代精神]
 
   fs.writeFileSync(filePath, frontMatter + normalizedReport + sourceList + '\n', 'utf-8');
   console.log(`[发布] 已写入: ${fileName}`);
+  return filePath;
 }
 
 // ============ 参数解析 ============
 function parseArgs() {
+  const deploy = process.argv.includes('--deploy');
   const noDeploy = process.argv.includes('--no-deploy');
+  if (deploy && noDeploy) {
+    console.error('错误: --deploy 和 --no-deploy 不能同时使用');
+    process.exit(1);
+  }
 
   // 安全解析 --days-ago：找到标志后的值，校验为合法非负整数
   let daysAgo = 0;
@@ -444,12 +467,12 @@ function parseArgs() {
     }
   }
 
-  return { noDeploy, daysAgo };
+  return { deploy, daysAgo };
 }
 
 // ============ 主流程 ============
 async function main() {
-  const { noDeploy, daysAgo } = parseArgs();
+  const { deploy, daysAgo } = parseArgs();
   const bjNow = beijingNow();
   const targetDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()));
   targetDate.setUTCDate(targetDate.getUTCDate() - daysAgo);
@@ -459,6 +482,7 @@ async function main() {
 
   console.log('========================================');
   console.log('  社会思想日报生成器');
+  if (!deploy) console.log('  (仅生成，不部署；如需本地部署请显式传 --deploy)');
   if (daysAgo > 0) console.log(`  生成日期: ${dateStrCN} (${daysAgo}天前)`);
   console.log('========================================\n');
 
@@ -488,9 +512,10 @@ async function main() {
   console.log(`\n--- 日报预览 ---\n${report.slice(0, 500)}...\n`);
 
   console.log('[步骤3] 写入文章...');
-  publishToHexo(report, dateStrCN, dateISO, promptNewsItems);
+  const postFile = publishToHexo(report, dateStrCN, dateISO, promptNewsItems);
 
-  if (!noDeploy) {
+  if (deploy) {
+    assertNoUnexpectedPostChanges([toGitPath(postFile)]);
     console.log('[步骤4] 部署网站...');
     const env = { ...process.env };
     if (PROXY_URL) {
