@@ -28,6 +28,10 @@ jobs:
       should_run: ${{ steps.guard.outputs.should_run }}
     steps:
       - uses: actions/checkout@v6
+      - name: Sync latest source branch
+        run: |
+          git fetch origin main
+          git checkout --detach origin/main
       - name: Compute Beijing date
         id: bj-date
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
