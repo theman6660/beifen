@@ -3,6 +3,8 @@ name: Daily Report Pipeline
 on:
   schedule:
     - cron: '17 0 * * *'  # 北京时间 8:17，避开整点高峰
+    - cron: '17 3 * * *'  # Beijing 11:17 fallback if the first schedule is delayed or missed
+    - cron: '17 6 * * *'  # Beijing 14:17 final fallback; preflight skips if posts already exist
   workflow_dispatch:
     inputs:
       force:
