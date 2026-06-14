@@ -22,17 +22,25 @@ const BASE_URL = (process.env.BASE_URL || 'https://api.deepseek.com').trim();
 const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
 
-if (!API_KEY) {
-  console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
-  process.exit(1);
-}
+let client;
 
-const client = new OpenAI({
-  apiKey: API_KEY,
-  baseURL: BASE_URL,
-  timeout: 180000,
-  maxRetries: 2,
-});
+function getClient() {
+  if (!API_KEY) {
+    console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
+    process.exit(1);
+  }
+
+  if (!client) {
+    client = new OpenAI({
+      apiKey: API_KEY,
+      baseURL: BASE_URL,
+      timeout: 180000,
+      maxRetries: 2,
+    });
+  }
+
+  return client;
+}
 
 const parser = new RSSParser({
   requestOptions: proxyAgent ? { agent: proxyAgent } : {},
@@ -44,6 +52,16 @@ const RSSHUB_URL = (process.env.RSSHUB_URL || '').trim().replace(/\/$/, '');
 
 function toGitPath(filePath) {
   return path.relative(HEXO_DIR, filePath).replace(/\\/g, '/');
+}
+
+function getDailyPostPath(dateISO) {
+  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  const fileName = `society-daily-${dateISO}.md`;
+  return {
+    postsDir,
+    fileName,
+    filePath: path.join(postsDir, fileName),
+  };
 }
 
 function assertNoUnexpectedPostChanges(allowedRelPaths) {
@@ -282,7 +300,7 @@ ${newsText}
 10. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成社会思想日报...');
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     max_tokens: 8000,
     messages: [{ role: 'user', content: prompt }],
@@ -312,7 +330,7 @@ ${report.slice(0, 3000)}`;
 
   try {
     console.log('[质检] 评估生成质量...');
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: MODEL,
       max_tokens: 200,
       messages: [{ role: 'user', content: checkPrompt }],
@@ -417,14 +435,10 @@ function buildSourceList(newsItems, maxSources = 30) {
 
 // ============ 发布到Hexo ============
 function publishToHexo(report, dateStrCN, dateISO, newsItems) {
-  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  const { postsDir, fileName, filePath } = getDailyPostPath(dateISO);
   if (!fs.existsSync(postsDir)) {
     fs.mkdirSync(postsDir, { recursive: true });
   }
-
-  // 使用 ISO 日期做文件名，避免中文 URL 编码
-  const fileName = `society-daily-${dateISO}.md`;
-  const filePath = path.join(postsDir, fileName);
 
   const title = `社会思想日报 - ${dateStrCN}`;
   const normalizedReport = normalizeReport(report, title);
@@ -448,6 +462,7 @@ tags: [社会心理, 精神分析, 时代精神]
 function parseArgs() {
   const deploy = process.argv.includes('--deploy');
   const noDeploy = process.argv.includes('--no-deploy');
+  const force = process.argv.includes('--force');
   if (deploy && noDeploy) {
     console.error('错误: --deploy 和 --no-deploy 不能同时使用');
     process.exit(1);
@@ -467,24 +482,33 @@ function parseArgs() {
     }
   }
 
-  return { deploy, daysAgo };
+  return { deploy, force, daysAgo };
 }
 
 // ============ 主流程 ============
 async function main() {
-  const { deploy, daysAgo } = parseArgs();
+  const { deploy, force, daysAgo } = parseArgs();
   const bjNow = beijingNow();
   const targetDate = new Date(Date.UTC(bjNow.getUTCFullYear(), bjNow.getUTCMonth(), bjNow.getUTCDate()));
   targetDate.setUTCDate(targetDate.getUTCDate() - daysAgo);
 
   const dateStrCN = beijingDateCN(targetDate);
   const dateISO = beijingDateISO(targetDate);
+  const { fileName, filePath } = getDailyPostPath(dateISO);
 
   console.log('========================================');
   console.log('  社会思想日报生成器');
   if (!deploy) console.log('  (仅生成，不部署；如需本地部署请显式传 --deploy)');
   if (daysAgo > 0) console.log(`  生成日期: ${dateStrCN} (${daysAgo}天前)`);
   console.log('========================================\n');
+
+  if (!force && fs.existsSync(filePath)) {
+    console.log(`[跳过] ${fileName} 已存在；传 --force 可重新生成。`);
+    return;
+  }
+  if (force && fs.existsSync(filePath)) {
+    console.log(`[force] ${fileName} 已存在，将重新生成并覆盖。`);
+  }
 
   console.log('[步骤1] 抓取社会新闻...');
   const newsItems = await fetchNews(targetDate);

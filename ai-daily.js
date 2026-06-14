@@ -22,17 +22,25 @@ const BASE_URL = (process.env.BASE_URL || 'https://api.deepseek.com').trim();
 const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
 
-if (!API_KEY) {
-  console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
-  process.exit(1);
-}
+let client;
 
-const client = new OpenAI({
-  apiKey: API_KEY,
-  baseURL: BASE_URL,
-  timeout: 180000,
-  maxRetries: 2,
-});
+function getClient() {
+  if (!API_KEY) {
+    console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
+    process.exit(1);
+  }
+
+  if (!client) {
+    client = new OpenAI({
+      apiKey: API_KEY,
+      baseURL: BASE_URL,
+      timeout: 180000,
+      maxRetries: 2,
+    });
+  }
+
+  return client;
+}
 
 const parser = new RSSParser({
   requestOptions: proxyAgent ? { agent: proxyAgent } : {},
@@ -45,15 +53,26 @@ const CHRONICLE_FILE = path.join(HEXO_DIR, 'source', '_posts', 'ai-chronicle.md'
 function parseRunMode() {
   const deploy = process.argv.includes('--deploy');
   const noDeploy = process.argv.includes('--no-deploy');
+  const force = process.argv.includes('--force');
   if (deploy && noDeploy) {
     console.error('错误: --deploy 和 --no-deploy 不能同时使用');
     process.exit(1);
   }
-  return { deploy };
+  return { deploy, force };
 }
 
 function toGitPath(filePath) {
   return path.relative(HEXO_DIR, filePath).replace(/\\/g, '/');
+}
+
+function getDailyPostPath(dateISO) {
+  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  const fileName = `ai-daily-${dateISO}.md`;
+  return {
+    postsDir,
+    fileName,
+    filePath: path.join(postsDir, fileName),
+  };
 }
 
 function assertNoUnexpectedPostChanges(allowedRelPaths) {
@@ -321,7 +340,7 @@ ${newsText}
 7. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成AI行业日报...');
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: MODEL,
     max_tokens: 9000,
     messages: [{ role: 'user', content: prompt }],
@@ -351,7 +370,7 @@ ${report.slice(0, 3500)}`;
 
   try {
     console.log('[质检] 评估生成质量...');
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: MODEL,
       max_tokens: 200,
       messages: [{ role: 'user', content: checkPrompt }],
@@ -510,7 +529,7 @@ ${newsText}
 
   try {
     console.log('[编年史] 分析今日新闻...');
-    const response = await client.chat.completions.create({
+    const response = await getClient().chat.completions.create({
       model: MODEL,
       max_tokens: 1500,
       messages: [{ role: 'user', content: prompt }],
@@ -601,14 +620,10 @@ ${newsText}
 
 // ============ 发布到Hexo ============
 function publishToHexo(report, dateStrCN, dateISO, newsItems) {
-  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  const { postsDir, fileName, filePath } = getDailyPostPath(dateISO);
   if (!fs.existsSync(postsDir)) {
     fs.mkdirSync(postsDir, { recursive: true });
   }
-
-  // 使用 ISO 日期做文件名，避免中文 URL 编码
-  const fileName = `ai-daily-${dateISO}.md`;
-  const filePath = path.join(postsDir, fileName);
 
   const title = `AI行业日报 - ${dateStrCN}`;
   const normalizedReport = normalizeReport(report, title);
@@ -631,7 +646,7 @@ ${normalizedReport}${sourceList}
 
 // ============ 主流程 ============
 async function main() {
-  const { deploy } = parseRunMode();
+  const { deploy, force } = parseRunMode();
   console.log('========================================');
   console.log('  AI行业日报生成器');
   if (!deploy) console.log('  (仅生成，不部署；如需本地部署请显式传 --deploy)');
@@ -639,6 +654,15 @@ async function main() {
 
   const dateISO = beijingDateISO();
   const dateStrCN = beijingDateCN();
+  const { fileName, filePath } = getDailyPostPath(dateISO);
+
+  if (!force && fs.existsSync(filePath)) {
+    console.log(`[跳过] ${fileName} 已存在；传 --force 可重新生成。`);
+    return;
+  }
+  if (force && fs.existsSync(filePath)) {
+    console.log(`[force] ${fileName} 已存在，将重新生成并覆盖。`);
+  }
 
   // 1. 抓取新闻
   console.log('[步骤1] 抓取AI新闻...\n');

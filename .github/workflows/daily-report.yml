@@ -71,7 +71,13 @@ jobs:
           BASE_URL: https://api.deepseek.com
           MODEL: deepseek-v4-pro
           BJ_DATE: ${{ needs.preflight.outputs.date }}
-        run: node ai-daily.js --no-deploy
+          FORCE_RUN: ${{ inputs.force || 'false' }}
+        run: |
+          args=(--no-deploy)
+          if [ "$FORCE_RUN" = "true" ]; then
+            args+=(--force)
+          fi
+          node ai-daily.js "${args[@]}"
       - uses: actions/upload-artifact@v7
         with:
           name: ai-posts
@@ -101,7 +107,13 @@ jobs:
           MODEL: deepseek-v4-pro
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
           BJ_DATE: ${{ needs.preflight.outputs.date }}
-        run: node society-daily.js --no-deploy
+          FORCE_RUN: ${{ inputs.force || 'false' }}
+        run: |
+          args=(--no-deploy)
+          if [ "$FORCE_RUN" = "true" ]; then
+            args+=(--force)
+          fi
+          node society-daily.js "${args[@]}"
       - uses: actions/upload-artifact@v7
         with:
           name: society-posts
