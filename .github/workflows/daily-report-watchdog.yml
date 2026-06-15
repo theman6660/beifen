@@ -1,0 +1,71 @@
+name: Daily Report Watchdog
+
+on:
+  schedule:
+    # Beijing 08:47-20:47 catch-up window. The main pipeline is idempotent,
+    # so repeated checks are cheap and skip once today's posts exist.
+    - cron: '47 0-12 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: daily-report-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check-and-dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Sync latest source branch
+        run: |
+          git fetch origin main
+          git checkout --detach origin/main
+
+      - name: Check today's daily posts
+        id: posts
+        run: |
+          DATE=$(TZ=Asia/Shanghai date +%F)
+          AI="source/_posts/ai-daily-$DATE.md"
+          SOC="source/_posts/society-daily-$DATE.md"
+
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+
+          if [ -f "$AI" ] && [ -f "$SOC" ]; then
+            echo "missing=false" >> "$GITHUB_OUTPUT"
+            echo "Today's daily posts already exist: $AI, $SOC"
+          else
+            echo "missing=true" >> "$GITHUB_OUTPUT"
+            echo "Today's daily posts are incomplete; watchdog will check for active runs."
+            [ -f "$AI" ] || echo "Missing: $AI"
+            [ -f "$SOC" ] || echo "Missing: $SOC"
+          fi
+
+      - name: Check active daily-report runs
+        id: active
+        if: steps.posts.outputs.missing == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          IN_PROGRESS=$(gh run list --workflow daily-report.yml --branch main --status in_progress --limit 10 --json databaseId --jq 'length')
+          QUEUED=$(gh run list --workflow daily-report.yml --branch main --status queued --limit 10 --json databaseId --jq 'length')
+          TOTAL=$((IN_PROGRESS + QUEUED))
+
+          echo "count=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "Active daily-report runs: $TOTAL"
+
+      - name: Dispatch daily report pipeline
+        if: steps.posts.outputs.missing == 'true' && steps.active.outputs.count == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run daily-report.yml --ref main
+          echo "Dispatched Daily Report Pipeline for ${{ steps.posts.outputs.date }}"
+
+      - name: Skip dispatch because a run is already active
+        if: steps.posts.outputs.missing == 'true' && steps.active.outputs.count != '0'
+        run: echo "Daily Report Pipeline is already queued or running; watchdog will not dispatch another one."
