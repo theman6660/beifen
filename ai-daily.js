@@ -5,6 +5,10 @@ const RSSParser = require('rss-parser');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const {
+  insertChronicleEntry,
+  writeChronicleEntryArtifact,
+} = require('./chronicle-utils');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -49,6 +53,7 @@ const parser = new RSSParser({
 
 const HEXO_DIR = process.env.HEXO_DIR || '.';
 const CHRONICLE_FILE = path.join(HEXO_DIR, 'source', '_posts', 'ai-chronicle.md');
+const CHRONICLE_ENTRY_FILE = (process.env.CHRONICLE_ENTRY_FILE || '').trim();
 
 function parseRunMode() {
   const deploy = process.argv.includes('--deploy');
@@ -475,34 +480,13 @@ function buildSourceList(newsItems, maxSources = 30) {
 
 // ============ 编年史更新 ============
 async function updateChronicle(newsItems) {
-  const { year, month, day } = getBeijingDateParts();
+  const { year, month } = getBeijingDateParts();
   const dateStrCN = beijingDateCN();
   const dateISO = beijingDateISO();
 
   let existingChronicle = '';
   if (fs.existsSync(CHRONICLE_FILE)) {
     existingChronicle = fs.readFileSync(CHRONICLE_FILE, 'utf-8');
-  }
-
-  if (!existingChronicle) {
-    existingChronicle = `---
-title: AI编年史：从图灵到此刻
-date: ${dateISO} 08:00:00
-categories: [AI编年史]
-tags: [编年史, 时间线, AI]
----
-
-# AI编年史：从图灵到此刻
-
-> 这是一份持续更新的AI发展编年史。它不记录每一天的新闻，只记录那些真正改变游戏规则的时刻——技术的突破、思想的碰撞、社会的转折。
-
----
-
-## ${year}年
-
-### ${month}月
-
-`;
   }
 
   const newsText = newsItems.slice(0, 20).map((item, i) =>
@@ -543,76 +527,30 @@ ${newsText}
       return;
     }
 
-    // 清理LLM输出中的Markdown标题，防止破坏文档结构
-    const resultText = rawText
-      .replace(/^## /gm, '**##** ')
-      .replace(/^### /gm, '**###** ');
+    const result = insertChronicleEntry(existingChronicle, rawText, {
+      year,
+      month,
+      dateISO,
+      dateStrCN,
+    });
 
-    // 检查今天是否已有条目（防止重复）
-    const todayMarker = `**${dateStrCN}**`;
-    if (existingChronicle.includes(todayMarker)) {
+    if (!result.updated && result.reason === 'date-exists') {
       console.log('[编年史] 今日已有条目，跳过');
       return;
     }
 
-    // 在编年史中插入新条目
-    const monthHeader = `### ${month}月`;
-    const yearHeader = `## ${year}年`;
-    const yearIndex = existingChronicle.indexOf(yearHeader);
-
-    let yearSectionEnd = existingChronicle.length;
-    if (yearIndex !== -1) {
-      const afterYearHdr = yearIndex + yearHeader.length;
-      const nextYearMatch = existingChronicle.slice(afterYearHdr).match(/\n## \d{4}年/);
-      if (nextYearMatch) yearSectionEnd = afterYearHdr + nextYearMatch.index;
+    if (!result.updated) {
+      console.log(`[编年史] 未产生可写入条目: ${result.reason}`);
+      return;
     }
 
-    let updatedChronicle;
-
-    if (yearIndex !== -1 && existingChronicle.slice(yearIndex, yearSectionEnd).includes(monthHeader)) {
-      // 当月 section 已存在：插在当月已有内容之后、下一个月/年之前
-      const monthIndexInYear = existingChronicle.indexOf(monthHeader, yearIndex);
-      const afterMonth = monthIndexInYear + monthHeader.length;
-      const nextBoundary = existingChronicle.slice(afterMonth).search(/\n(?:## \d{4}年|### \d{1,2}月)/);
-      const insertPoint = nextBoundary === -1 ? yearSectionEnd : afterMonth + nextBoundary;
-
-      updatedChronicle = existingChronicle.slice(0, insertPoint) + '\n' + resultText + '\n' + existingChronicle.slice(insertPoint);
-    } else if (yearIndex !== -1) {
-      // 当月 section 不存在：按月份顺序插入
-      const yearSection = existingChronicle.slice(yearIndex, yearSectionEnd);
-      const monthRegex = /### (\d+)月/g;
-      let insertAfter = yearIndex + yearHeader.length;
-      let m;
-      while ((m = monthRegex.exec(yearSection)) !== null) {
-        const existingMonth = parseInt(m[1], 10);
-        if (existingMonth < month) {
-          const absPos = yearIndex + m.index;
-          const afterExistingMonth = absPos + m[0].length;
-          const nextBoundary = existingChronicle.slice(afterExistingMonth).search(/\n(?:## \d{4}年|### \d{1,2}月)/);
-          const secEnd = nextBoundary === -1 ? yearSectionEnd : afterExistingMonth + nextBoundary;
-          insertAfter = secEnd;
-        }
-      }
-      updatedChronicle = existingChronicle.slice(0, insertAfter) + '\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(insertAfter);
-    } else {
-      // 今年 section 不存在
-      const firstYearMatch = existingChronicle.match(/\n## \d{4}年/);
-      if (firstYearMatch) {
-        const insertAt = existingChronicle.indexOf(firstYearMatch[0]);
-        updatedChronicle = existingChronicle.slice(0, insertAt) + '\n\n## ' + year + '年\n\n' + monthHeader + '\n' + resultText + '\n' + existingChronicle.slice(insertAt);
-      } else {
-        updatedChronicle = existingChronicle + '\n## ' + year + '年\n\n' + monthHeader + '\n' + resultText + '\n';
-      }
+    if (CHRONICLE_ENTRY_FILE) {
+      writeChronicleEntryArtifact(CHRONICLE_ENTRY_FILE, result.entryText);
+      console.log(`[编年史] 已写入新增条目 artifact: ${CHRONICLE_ENTRY_FILE}`);
     }
 
-    // 只在 frontmatter 中更新日期
-    updatedChronicle = updatedChronicle.replace(
-      /^(---[\s\S]*?^date: )\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/m,
-      `$1${dateISO} 08:00:00`
-    );
-
-    fs.writeFileSync(CHRONICLE_FILE, updatedChronicle, 'utf-8');
-    console.log(`[编年史] 已更新: ${resultText.split('\n')[0]}`);
+    fs.writeFileSync(CHRONICLE_FILE, result.content, 'utf-8');
+    console.log(`[编年史] 已更新: ${result.entryText.split('\n')[0]}`);
   } catch (err) {
     console.error('[编年史] 更新失败:', err.message);
   }

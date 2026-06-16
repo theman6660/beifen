@@ -72,6 +72,7 @@ jobs:
           MODEL: deepseek-v4-pro
           BJ_DATE: ${{ needs.preflight.outputs.date }}
           FORCE_RUN: ${{ inputs.force || 'false' }}
+          CHRONICLE_ENTRY_FILE: .local-artifacts/ai-chronicle-entry.md
         run: |
           args=(--no-deploy)
           if [ "$FORCE_RUN" = "true" ]; then
@@ -85,8 +86,8 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
-          name: ai-chronicle
-          path: source/_posts/ai-chronicle.md
+          name: ai-chronicle-entry
+          path: .local-artifacts/ai-chronicle-entry.md
           if-no-files-found: warn
 
   society-daily:
@@ -146,8 +147,13 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: society-posts, path: source/_posts/ }
       - uses: actions/download-artifact@v8
-        with: { name: ai-chronicle, path: source/_posts/ }
+        with: { name: ai-chronicle-entry, path: .local-artifacts/chronicle-entry/ }
         continue-on-error: true
+
+      - name: Apply AI chronicle entry to latest source
+        env:
+          BJ_DATE: ${{ needs.preflight.outputs.date }}
+        run: node tools/apply-chronicle-entry.js --entry .local-artifacts/chronicle-entry/ai-chronicle-entry.md --chronicle source/_posts/ai-chronicle.md
 
       - name: Check today's files exist
         run: |
