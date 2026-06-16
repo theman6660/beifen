@@ -490,17 +490,22 @@ async function updateChronicle(newsItems) {
   }
 
   const newsText = newsItems.slice(0, 20).map((item, i) =>
-    `${i + 1}. ${item.title}`
-  ).join('\n');
+    `${i + 1}. [${item.source}] ${item.title}${item.snippet ? `\n   摘要: ${item.snippet.slice(0, 200)}` : ''}`
+  ).join('\n\n');
 
   const prompt = `判断以下AI行业新闻中，是否有值得记录到编年史的重大事件。
 
-今日新闻标题：
+今日新闻（含来源和摘要用于交叉验证）：
 ${newsText}
 
 记录标准（必须同时满足）：
 1. 技术上有质的飞跃（不是渐进改进）
 2. 对社会或行业有深远影响
+
+注意：
+- 利用摘要和来源判断事件的真实性和重要性，忽略标题党
+- 排除：常规产品更新、小版本迭代、融资传闻、未证实的推测
+- 同一事件被多个来源报道时只记录一次
 
 如果没有符合条件的事件，只输出：无更新
 
@@ -534,14 +539,18 @@ ${newsText}
       dateStrCN,
     });
 
-    if (!result.updated && result.reason === 'date-exists') {
-      console.log('[编年史] 今日已有条目，跳过');
+    if (!result.updated && result.reason === 'date-exists-merge-failed') {
+      console.log('[编年史] 同日合并失败，跳过');
       return;
     }
 
     if (!result.updated) {
       console.log(`[编年史] 未产生可写入条目: ${result.reason}`);
       return;
+    }
+
+    if (result.reason === 'appended-to-date') {
+      console.log('[编年史] 同日已有条目，追加合并');
     }
 
     if (CHRONICLE_ENTRY_FILE) {

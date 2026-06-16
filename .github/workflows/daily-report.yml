@@ -151,9 +151,34 @@ jobs:
         continue-on-error: true
 
       - name: Apply AI chronicle entry to latest source
+        id: chronicle
         env:
           BJ_DATE: ${{ needs.preflight.outputs.date }}
-        run: node tools/apply-chronicle-entry.js --entry .local-artifacts/chronicle-entry/ai-chronicle-entry.md --chronicle source/_posts/ai-chronicle.md
+        run: |
+          ENTRY=".local-artifacts/chronicle-entry/ai-chronicle-entry.md"
+          if [ -f "$ENTRY" ]; then
+            echo "entry_exists=true" >> "$GITHUB_OUTPUT"
+            echo "📄 编年史条目 artifact 存在"
+          else
+            echo "entry_exists=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ 今日无编年史条目 artifact"
+          fi
+          node tools/apply-chronicle-entry.js --entry "$ENTRY" --chronicle source/_posts/ai-chronicle.md
+          echo "apply_status=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Report chronicle status
+        if: always() && steps.chronicle.outputs.entry_exists == 'true'
+        env:
+          ENTRY_EXISTS: ${{ steps.chronicle.outputs.entry_exists }}
+          APPLY_STATUS: ${{ steps.chronicle.outputs.apply_status }}
+        run: |
+          if [ "$APPLY_STATUS" != "0" ]; then
+            echo "### ⚠ 编年史条目写入异常" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 编年史条目 artifact 存在，但 apply-chronicle-entry.js 退出码为 $APPLY_STATUS" >> "$GITHUB_STEP_SUMMARY"
+            echo "- 日报已正常发布，请手动检查编年史" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### ✅ 编年史处理完成" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Check today's files exist
         run: |

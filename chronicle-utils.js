@@ -66,6 +66,32 @@ function findYearSectionEnd(content, yearHeader, yearIndex) {
   return yearSectionEnd;
 }
 
+// 在已有同日条目后找到追加位置：下一条日期条目或章节边界
+function findInsertAfterExistingDateEntry(content, dateMarker) {
+  const datePos = content.indexOf(dateMarker);
+  if (datePos === -1) return -1;
+
+  // 从 dateMarker 位置开始扫描，找到这一行的结尾
+  const afterLine = content.indexOf('\n', datePos);
+  if (afterLine === -1) return content.length;
+
+  // 从此行之后找下一条条目或章节边界
+  const rest = content.slice(afterLine + 1);
+  const nextEntryMatch = rest.match(/\n- \*\*\d{4}年\d{1,2}月\d{1,2}日\*\*/);
+  const nextSectionMatch = rest.match(/\n(?:## \d{4}年|### \d{1,2}月)/);
+
+  let offset = rest.length;
+  if (nextEntryMatch) offset = Math.min(offset, nextEntryMatch.index);
+  if (nextSectionMatch) offset = Math.min(offset, nextSectionMatch.index);
+
+  // 回退到末尾非空行
+  let insertPoint = afterLine + 1 + offset;
+  while (insertPoint > afterLine + 1 && content[insertPoint - 1] === '\n') {
+    insertPoint--;
+  }
+  return insertPoint;
+}
+
 function insertChronicleEntry(existingChronicle, rawEntry, {
   year,
   month,
@@ -82,8 +108,21 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
   content = ensureChroniclePermalink(content, permalink);
 
   const todayMarker = dateStrCN ? `**${dateStrCN}**` : '';
+
+  // 同日已有条目 → 追加而不是跳过
   if (todayMarker && content.includes(todayMarker)) {
-    return { updated: false, reason: 'date-exists', content, entryText };
+    const insertPoint = findInsertAfterExistingDateEntry(content, todayMarker);
+    if (insertPoint > 0) {
+      const merged = content.slice(0, insertPoint) + '\n' + entryText + '\n' + content.slice(insertPoint);
+      return {
+        updated: true,
+        reason: 'appended-to-date',
+        content: updateChronicleDate(merged, dateISO),
+        entryText,
+      };
+    }
+    // 如果找不到插入点（不应发生），保守回退到跳过
+    return { updated: false, reason: 'date-exists-merge-failed', content, entryText };
   }
 
   const monthHeader = `### ${month}月`;
