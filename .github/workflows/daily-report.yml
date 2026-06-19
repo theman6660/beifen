@@ -123,7 +123,7 @@ jobs:
 
   deploy:
     needs: [preflight, ai-daily, society-daily]
-    if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
+    if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && (needs.ai-daily.result == 'success' || needs.society-daily.result == 'success')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

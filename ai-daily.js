@@ -325,26 +325,26 @@ ${newsText}
 
 要求：
 1. 不要输出文章总标题，标题会由 Hexo frontmatter 提供
-2. 使用 Markdown 二级标题组织结构。板块顺序固定，只输出有足够素材支撑的板块，无素材则跳过：
-   ## 今日速览（必有）
-   ## 今日要闻（必有）
-   ## 行业动态
-   ## 技术进展
-   ## 商业动态
-   ## 政策与监管
-   ## 影响分析
+2. 使用 Markdown 二级标题组织结构。以下板块按顺序输出：
+   ## 今日速览（固定输出）
+   ## 今日要闻（固定输出）
+   ## 行业动态（有足够素材时输出）
+   ## 技术进展（有足够素材时输出）
+   ## 商业动态（有足够素材时输出）
+   ## 政策与监管（有足够素材时输出）
+   ## 影响分析（有足够素材时输出）
 3. 各板块说明与格式：
-   - **今日速览**：4-6条要点，每条一行。格式：\`- **关键词**：一句话概括\`。让读者30秒内掌握今日核心动态。不展开分析。
+   - **今日速览**：2-6条要点，每条一行。格式：\`- **关键词**：一句话概括\`。让读者30秒内掌握今日核心动态。不展开分析。哪怕素材有限，至少列出2条最重要的动态。
    - **今日要闻**：选择最重要的2-3条新闻。每条必须使用以下结构，用加粗标签分隔：
      **事件**：（2-3句话概述）
      **为什么重要**：（3-5句话深度分析，说明这条新闻的深层意义、背后趋势）
      **行业影响**：（2-4句话预判对行业的短期和长期影响）
      每条要闻之间用 \`---\` 分隔线隔开。
-   - 行业动态：竞争格局变化、巨头战略调整、市场趋势。每条不少于100字。
-   - 技术进展：技术突破、开源发布、论文/基准测试结果。每条不少于100字。
-   - 商业动态：融资、IPO、收购、产品发布。每条不少于100字。
-   - 政策与监管：全球AI监管政策、合规动态。每条不少于100字。
-   - 影响分析：这些变化对未来6-12个月行业走向的深层影响。可引用前文要点，但不重复叙述。
+   - 行业动态：竞争格局变化、巨头战略调整、市场趋势。每条不少于100字。素材不足则跳过整个板块。
+   - 技术进展：技术突破、开源发布、论文/基准测试结果。每条不少于100字。素材不足则跳过整个板块。
+   - 商业动态：融资、IPO、收购、产品发布。每条不少于100字。素材不足则跳过整个板块。
+   - 政策与监管：全球AI监管政策、合规动态。每条不少于100字。素材不足则跳过整个板块。
+   - 影响分析：这些变化对未来6-12个月行业走向的深层影响。可引用前文要点，但不重复叙述。素材不足则跳过整个板块。
 4. 格式要求：
    - 每个板块至少2处 **加粗关键句或关键词**，帮助读者快速扫读
    - 不使用编号列表（1. 2. 3.），用自然段落和加粗标签组织
@@ -374,7 +374,7 @@ async function checkQuality(report) {
   const checkPrompt = `评估以下AI行业日报的质量。只需回复"PASS"或"FAIL: <原因>"。
 
 检查标准：
-1. 是否有"今日速览"板块？速览是否包含4-6条要点？
+1. 是否有"今日速览"板块？速览是否包含2-6条要点？
 2. 今日要闻是否使用 **事件**/**为什么重要**/**行业影响** 三标签结构？
 3. 总字数是否在2500-4000字之间？
 4. 每个板块是否有实质性分析（不是简单的新闻概括）？
@@ -413,6 +413,10 @@ function localQualityCheck(report) {
 
   if (plainText.length < 2500) {
     return { pass: false, reason: `正文过短：${plainText.length} 字，少于 2500 字` };
+  }
+
+  if (plainText.length > 5000) {
+    return { pass: false, reason: `正文过长：${plainText.length} 字，超过 5000 字上限` };
   }
 
   if (sectionCount < 3) {
@@ -480,8 +484,6 @@ function buildSourceList(newsItems, maxSources = 30) {
     const key = `${item.title}|${item.link}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    // 只保留 AI 相关条目，避免无关来源混入参考列表
-    if (!isAIRelevantItem(item)) continue;
     sources.push(`- [${item.source}] [${item.title}](${item.link})`);
     if (sources.length >= maxSources) break;
   }
@@ -635,7 +637,8 @@ async function main() {
 
   // 2. 生成报告
   console.log('[步骤2] 生成行业报告（含质量评估+自动重试）...\n');
-  const promptNewsItems = selectNewsForPrompt(newsItems);
+  const promptNewsItems = selectNewsForPrompt(newsItems)
+    .filter(isAIRelevantItem);
   const coverage = validateSourceCoverage(promptNewsItems);
   if (!coverage.pass) {
     console.log(`[跳过] ${coverage.reason}`);
