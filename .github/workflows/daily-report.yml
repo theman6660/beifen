@@ -123,7 +123,7 @@ jobs:
 
   deploy:
     needs: [preflight, ai-daily, society-daily]
-    if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && (needs.ai-daily.result == 'success' || needs.society-daily.result == 'success')
+    if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -184,14 +184,15 @@ jobs:
         run: |
           AI="source/_posts/ai-daily-${{ needs.preflight.outputs.date }}.md"
           SOC="source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md"
-          FOUND=""
-          [ -f "$AI" ] && FOUND="$FOUND ai-daily"
-          [ -f "$SOC" ] && FOUND="$FOUND society-daily"
-          if [ -z "$FOUND" ]; then
-            echo "❌ 今天没有任何日报文件生成，中止部署"
+          MISSING=""
+          [ -f "$AI" ] || MISSING="$MISSING ai-daily"
+          [ -f "$SOC" ] || MISSING="$MISSING society-daily"
+          if [ -n "$MISSING" ]; then
+            echo "❌ 以下日报文件缺失: $MISSING"
+            echo "需要两份日报都存在才能部署。检查对应 job 日志排查生成失败原因。"
             exit 1
           fi
-          echo "📄 今天生成的文件: $FOUND"
+          echo "📄 两份日报文件均已生成: ai-daily + society-daily"
 
       - name: Validate today's frontmatter
         run: |

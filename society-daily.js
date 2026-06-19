@@ -394,9 +394,18 @@ function validateSourceCoverage(newsItems) {
   return { pass: true, reason: '素材覆盖通过' };
 }
 
+function scoreReport(report) {
+  const plainText = report
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/[#>*_`[\]()!-]/g, '')
+    .replace(/\s+/g, '');
+  const sectionCount = (report.match(/^##\s+/gm) || []).length;
+  return plainText.length + sectionCount * 200;
+}
+
 async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
   let bestReport = '';
-  let lastReport = '';
+  let bestScore = 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
@@ -407,7 +416,6 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
       continue;
     }
 
-    lastReport = report;
     const { pass, reason } = await checkQuality(report, dateStrCN);
 
     if (pass) {
@@ -416,11 +424,15 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
     }
 
     console.log(`[质检] 未通过: ${reason}`);
-    bestReport = report; // Keep last result in case all fail
+    const score = scoreReport(report);
+    if (score > bestScore) {
+      bestScore = score;
+      bestReport = report;
+    }
   }
 
-  console.log('[质检] 所有重试未通过，返回最后一次结果');
-  return bestReport || lastReport || '';
+  console.log('[质检] 所有重试未通过，返回评分最高的结果');
+  return bestReport || '';
 }
 
 function normalizeReport(report, title) {
@@ -531,23 +543,23 @@ async function main() {
   console.log(`\n共获取 ${newsItems.length} 条新闻\n`);
 
   if (newsItems.length === 0) {
-    console.log('没有获取到新闻，退出');
-    return;
+    console.error('没有获取到新闻，生成失败');
+    process.exit(1);
   }
 
   console.log('[步骤2] 生成社会思想日报（含质量评估+自动重试）...');
   const promptNewsItems = selectNewsForPrompt(newsItems);
   const coverage = validateSourceCoverage(promptNewsItems);
   if (!coverage.pass) {
-    console.log(`[跳过] ${coverage.reason}`);
-    return;
+    console.error(`素材覆盖不足: ${coverage.reason}`);
+    process.exit(1);
   }
 
   const report = await generateWithRetry(promptNewsItems, dateStrCN);
 
   if (!report) {
-    console.log('LLM未返回内容，退出');
-    return;
+    console.error('LLM 未返回内容，生成失败');
+    process.exit(1);
   }
   console.log(`\n--- 日报预览 ---\n${report.slice(0, 500)}...\n`);
 

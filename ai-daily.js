@@ -437,9 +437,18 @@ function validateSourceCoverage(newsItems) {
   return { pass: true, reason: '素材覆盖通过' };
 }
 
+function scoreReport(report) {
+  const plainText = report
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/[#>*_`[\]()!-]/g, '')
+    .replace(/\s+/g, '');
+  const sectionCount = (report.match(/^##\s+/gm) || []).length;
+  return plainText.length + sectionCount * 200;
+}
+
 async function generateWithRetry(promptNewsItems, maxRetries = 2) {
   let bestReport = '';
-  let lastReport = '';
+  let bestScore = 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
@@ -450,7 +459,6 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
       continue;
     }
 
-    lastReport = report;
     const { pass, reason } = await checkQuality(report);
 
     if (pass) {
@@ -459,11 +467,15 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
     }
 
     console.log(`[质检] 未通过: ${reason}`);
-    bestReport = report;
+    const score = scoreReport(report);
+    if (score > bestScore) {
+      bestScore = score;
+      bestReport = report;
+    }
   }
 
-  console.log('[质检] 所有重试未通过，返回最后一次结果');
-  return bestReport || lastReport || '';
+  console.log('[质检] 所有重试未通过，返回评分最高的结果');
+  return bestReport || '';
 }
 
 function normalizeReport(report, title) {
@@ -631,8 +643,8 @@ async function main() {
   console.log(`\n共获取 ${newsItems.length} 条新闻\n`);
 
   if (newsItems.length === 0) {
-    console.log('今日无新闻，跳过生成');
-    return;
+    console.error('今日无新闻，生成失败');
+    process.exit(1);
   }
 
   // 2. 生成报告
@@ -641,15 +653,15 @@ async function main() {
     .filter(isAIRelevantItem);
   const coverage = validateSourceCoverage(promptNewsItems);
   if (!coverage.pass) {
-    console.log(`[跳过] ${coverage.reason}`);
-    return;
+    console.error(`素材覆盖不足: ${coverage.reason}`);
+    process.exit(1);
   }
 
   const report = await generateWithRetry(promptNewsItems);
 
   if (!report) {
-    console.log('[跳过] LLM 未返回内容');
-    return;
+    console.error('LLM 未返回内容，生成失败');
+    process.exit(1);
   }
 
   // 3. 发布到Hexo
