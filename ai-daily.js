@@ -426,14 +426,43 @@ function localQualityCheck(report) {
   return { pass: true, reason: '本地硬检查通过' };
 }
 
+const SOURCE_COVERAGE_THRESHOLDS = {
+  idealNewsItems: 12,
+  idealSources: 5,
+  minimumNewsItems: 8,
+  minimumSources: 3,
+};
+
 function validateSourceCoverage(newsItems) {
   const sourceCount = new Set(newsItems.map(item => item.source)).size;
-  if (newsItems.length < 12) {
-    return { pass: false, reason: `素材过少：${newsItems.length} 条，少于 12 条` };
+  const warnings = [];
+
+  if (newsItems.length < SOURCE_COVERAGE_THRESHOLDS.minimumNewsItems) {
+    return {
+      pass: false,
+      reason: '素材过少：' + newsItems.length + ' 条，少于可生成下限 ' + SOURCE_COVERAGE_THRESHOLDS.minimumNewsItems + ' 条',
+    };
   }
-  if (sourceCount < 5) {
-    return { pass: false, reason: `来源过少：${sourceCount} 个，少于 5 个` };
+
+  if (sourceCount < SOURCE_COVERAGE_THRESHOLDS.minimumSources) {
+    return {
+      pass: false,
+      reason: '来源过少：' + sourceCount + ' 个，少于可生成下限 ' + SOURCE_COVERAGE_THRESHOLDS.minimumSources + ' 个',
+    };
   }
+
+  if (newsItems.length < SOURCE_COVERAGE_THRESHOLDS.idealNewsItems) {
+    warnings.push('素材 ' + newsItems.length + ' 条，低于理想值 ' + SOURCE_COVERAGE_THRESHOLDS.idealNewsItems + ' 条');
+  }
+
+  if (sourceCount < SOURCE_COVERAGE_THRESHOLDS.idealSources) {
+    warnings.push('来源 ' + sourceCount + ' 个，低于理想值 ' + SOURCE_COVERAGE_THRESHOLDS.idealSources + ' 个');
+  }
+
+  if (warnings.length > 0) {
+    return { pass: true, reason: '素材覆盖偏低：' + warnings.join('；') + '，降级继续生成' };
+  }
+
   return { pass: true, reason: '素材覆盖通过' };
 }
 
@@ -655,6 +684,9 @@ async function main() {
   if (!coverage.pass) {
     console.error(`素材覆盖不足: ${coverage.reason}`);
     process.exit(1);
+  }
+  if (coverage.reason !== '素材覆盖通过') {
+    console.warn(`[素材覆盖警告] ${coverage.reason}`);
   }
 
   const report = await generateWithRetry(promptNewsItems);
