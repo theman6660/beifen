@@ -3,6 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 const { insertChronicleEntry } = require('../chronicle-utils');
+const {
+  getBeijingDateParts,
+  beijingDateISO,
+  beijingDateCN,
+} = require('../lib/date-utils');
 
 function parseArgs(argv) {
   const args = {};
@@ -19,21 +24,6 @@ function parseArgs(argv) {
     }
   }
   return args;
-}
-
-function getBeijingDateParts() {
-  if (process.env.BJ_DATE) {
-    const [year, month, day] = process.env.BJ_DATE.split('-').map(Number);
-    return { year, month, day };
-  }
-
-  const now = new Date();
-  const beijingNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
-  return {
-    year: beijingNow.getUTCFullYear(),
-    month: beijingNow.getUTCMonth() + 1,
-    day: beijingNow.getUTCDate(),
-  };
 }
 
 function main() {
@@ -53,8 +43,8 @@ function main() {
   }
 
   const { year, month, day } = getBeijingDateParts();
-  const dateISO = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  const dateStrCN = `${year}年${month}月${day}日`;
+  const dateISO = beijingDateISO();
+  const dateStrCN = beijingDateCN();
   const existingChronicle = fs.existsSync(chronicleFile)
     ? fs.readFileSync(chronicleFile, 'utf-8')
     : '';

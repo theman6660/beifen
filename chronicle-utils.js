@@ -8,8 +8,10 @@ function normalizeChronicleEntry(rawText) {
     .trim()
     .replace(/^```(?:markdown)?\s*/i, '')
     .replace(/```\s*$/i, '')
-    .replace(/^## /gm, '**##** ')
-    .replace(/^### /gm, '**###** ')
+    // LLM 偶尔会在条目里带 Markdown 标题（## / ### …），会破坏编年史的
+    // 年/月分章结构。直接剥离标题前缀（而非转成 **##** 这种会原样显示
+    // 的字面文本），让正文回落为普通段落。
+    .replace(/^#{2,6}\s+/gm, '')
     .trim();
 }
 

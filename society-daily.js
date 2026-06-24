@@ -5,6 +5,12 @@ const RSSParser = require('rss-parser');
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const {
+  beijingNow,
+  getBeijingDateParts,
+  beijingDateISO,
+  beijingDateCN,
+} = require('./lib/date-utils');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -78,32 +84,7 @@ function assertNoUnexpectedPostChanges(allowedRelPaths) {
 }
 
 // ============ 北京时间工具函数 ============
-function beijingNow() {
-  if (process.env.BJ_DATE) {
-    const [y, m, d] = process.env.BJ_DATE.split('-').map(Number);
-    return new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
-  }
-  const now = new Date();
-  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
-}
-
-function beijingDateParts(d) {
-  return {
-    year: d.getUTCFullYear(),
-    month: d.getUTCMonth() + 1,
-    day: d.getUTCDate(),
-  };
-}
-
-function beijingDateISO(d) {
-  const p = beijingDateParts(d);
-  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
-}
-
-function beijingDateCN(d) {
-  const p = beijingDateParts(d);
-  return `${p.year}年${p.month}月${p.day}日`;
-}
+// 见 ./lib/date-utils.js（共享模块，与 ai-daily.js / apply-chronicle-entry.js 复用）
 
 // ============ RSS源 ============
 const DIRECT_SOURCES = [
@@ -203,11 +184,12 @@ async function fetchNews(targetDate) {
   const t = targetDate || beijingNow();
   const bjToday = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()));
 
-  const allItems = [];
   const sources = getAllSources();
 
-  for (const source of sources) {
-    try {
+  // 并行抓取所有源：每源 lookbackDays 不同，在各自 task 内计算 cutoff。
+  // 失败源不应中断整体抓取。
+  const results = await Promise.allSettled(
+    sources.map(async (source) => {
       const lookbackDays = source.lookbackDays || 1;
       const cutoff = new Date(bjToday);
       cutoff.setUTCDate(cutoff.getUTCDate() - lookbackDays);
@@ -230,10 +212,18 @@ async function fetchNews(targetDate) {
           _timestamp: new Date(item.pubDate || item.isoDate).getTime(),
         }));
 
-      allItems.push(...recentItems);
-      console.log(`  -> 获取 ${recentItems.length} 条`);
-    } catch (err) {
-      console.log(`  -> ${source.name} 抓取失败: ${err.message || String(err)}`);
+      console.log(`  -> ${source.name}：获取 ${recentItems.length} 条`);
+      return recentItems;
+    })
+  );
+
+  const allItems = [];
+  for (let i = 0; i < results.length; i += 1) {
+    const r = results[i];
+    if (r.status === 'fulfilled') {
+      allItems.push(...r.value);
+    } else {
+      console.log(`  -> ${sources[i].name} 抓取失败: ${r.reason?.message || String(r.reason)}`);
     }
   }
 
@@ -364,7 +354,7 @@ ${report.slice(0, 4000)}`;
 function localQualityCheck(report) {
   const plainText = report
     .replace(/```[\s\S]*?```/g, '')
-    .replace(/[#>*_`[\]()!-]/g, '')
+    .replace(/[#>*_`[\]()!\-]/g, '')
     .replace(/\s+/g, '');
   const sectionCount = (report.match(/^##\s+/gm) || []).length;
 
@@ -426,7 +416,7 @@ function validateSourceCoverage(newsItems) {
 function scoreReport(report) {
   const plainText = report
     .replace(/```[\s\S]*?```/g, '')
-    .replace(/[#>*_`[\]()!-]/g, '')
+    .replace(/[#>*_`[\]()!\-]/g, '')
     .replace(/\s+/g, '');
   const sectionCount = (report.match(/^##\s+/gm) || []).length;
   return plainText.length + sectionCount * 200;
