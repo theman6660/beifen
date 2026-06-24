@@ -27,7 +27,7 @@
     "hexo-theme-landscape": "^1.0.0",
     "hexo-theme-redefine": "^2.9.0",
     "hexo-wordcount": "^6.0.1",
-    "https-proxy-agent": "^9.0.0",
+    "https-proxy-agent": "^9.1.0",
     "openai": "^4.104.0",
     "rss-parser": "^3.13.0"
   }
