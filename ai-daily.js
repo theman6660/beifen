@@ -46,6 +46,9 @@ function getClient() {
       baseURL: BASE_URL,
       timeout: 180000,
       maxRetries: 2,
+      defaultHeaders: {
+        'Accept-Encoding': 'identity',
+      },
     });
   }
 
