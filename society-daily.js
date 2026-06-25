@@ -422,6 +422,37 @@ function scoreReport(report) {
   return plainText.length + sectionCount * 200;
 }
 
+function formatErrorMessage(err) {
+  return [err?.name, err?.code, err?.status, err?.message]
+    .filter(Boolean)
+    .join(' ') || String(err);
+}
+
+function isTransientLLMError(err) {
+  const status = Number(err?.status || err?.response?.status || 0);
+  if ([408, 409, 425, 429, 500, 502, 503, 504].includes(status)) {
+    return true;
+  }
+
+  const message = formatErrorMessage(err).toLowerCase();
+  return [
+    'premature close',
+    'invalid response body',
+    'socket hang up',
+    'econnreset',
+    'etimedout',
+    'fetch failed',
+    'network',
+    'aborted',
+    'timeout',
+    'temporarily unavailable',
+  ].some(token => message.includes(token));
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
   let bestReport = '';
   let bestScore = 0;
@@ -429,7 +460,22 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
-    const report = await generateReport(promptNewsItems);
+    let report = '';
+    try {
+      report = await generateReport(promptNewsItems);
+    } catch (err) {
+      const message = formatErrorMessage(err);
+      if (attempt < maxRetries && isTransientLLMError(err)) {
+        const delayMs = Math.min(30000, 5000 * 2 ** attempt);
+        console.log(`[生成] LLM调用失败（${message}），${Math.round(delayMs / 1000)}秒后重试...`);
+        await wait(delayMs);
+        continue;
+      }
+
+      console.error(`[生成] LLM调用失败，已无可用重试: ${message}`);
+      throw err;
+    }
+
     if (!report) {
       console.log('[生成] 空内容，重试...');
       continue;
