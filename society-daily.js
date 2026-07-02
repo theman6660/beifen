@@ -27,6 +27,8 @@ const API_KEY = (process.env.AUTH_TOKEN || process.env.DEEPSEEK_API_KEY || '').t
 const BASE_URL = (process.env.BASE_URL || 'https://api.deepseek.com').trim();
 const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
+const PROMPT_NEWS_LIMIT = 40;
+const PROMPT_SNIPPET_CHARS = 500;
 
 let client;
 
@@ -119,6 +121,122 @@ const CN_SOURCES = new Set([
   ...RSSHUB_SOURCES.map(source => source.name),
 ]);
 
+const SOURCE_IMPORTANCE_WEIGHTS = new Map([
+  ['The Guardian·Society', 7],
+  ['PsyPost', 7],
+  ['The Conversation·Social Sciences', 7],
+  ['Aeon', 6],
+  ['The Marginalian', 6],
+  ['The Society Pages', 6],
+  ['Longreads', 5],
+  ['澎湃新闻·思想', 5],
+  ['新周刊', 4],
+  ['看理想', 4],
+  ['单读', 4],
+  ['知乎热榜', 4],
+  ['微博热搜', 4],
+  ['少数派', 3],
+  ['阮一峰周刊', 3],
+  ['知乎日报', 3],
+  ['书单', 2],
+]);
+
+const IMPORTANCE_SIGNALS = [
+  { token: 'mental health', label: '心理健康', weight: 6 },
+  { token: 'loneliness', label: '孤独', weight: 5 },
+  { token: 'anxiety', label: '焦虑', weight: 5 },
+  { token: 'relationship', label: '关系', weight: 4 },
+  { token: 'family', label: '家庭', weight: 4 },
+  { token: 'education', label: '教育', weight: 4 },
+  { token: 'work', label: '工作', weight: 3 },
+  { token: 'labor', label: '劳动', weight: 3 },
+  { token: 'youth', label: '青年', weight: 4 },
+  { token: 'gender', label: '性别', weight: 4 },
+  { token: 'identity', label: '身份', weight: 4 },
+  { token: 'trust', label: '信任', weight: 3 },
+  { token: 'community', label: '共同体', weight: 3 },
+  { token: '心理', label: '心理', weight: 5 },
+  { token: '焦虑', label: '焦虑', weight: 5 },
+  { token: '孤独', label: '孤独', weight: 5 },
+  { token: '抑郁', label: '心理健康', weight: 5 },
+  { token: '亲密关系', label: '亲密关系', weight: 5 },
+  { token: '婚恋', label: '婚恋', weight: 4 },
+  { token: '家庭', label: '家庭', weight: 4 },
+  { token: '教育', label: '教育', weight: 4 },
+  { token: '就业', label: '就业', weight: 4 },
+  { token: '青年', label: '青年', weight: 4 },
+  { token: '女性', label: '性别', weight: 4 },
+  { token: '代际', label: '代际', weight: 4 },
+  { token: '信任', label: '信任', weight: 3 },
+  { token: '消费', label: '消费', weight: 3 },
+  { token: '城市', label: '城市生活', weight: 3 },
+  { token: '热搜', label: '公共情绪', weight: 3 },
+  { token: '争议', label: '公共情绪', weight: 3 },
+];
+
+function getItemText(item) {
+  return [
+    item.title,
+    item.contentSnippet,
+    item.content,
+    item.summary,
+    item.snippet,
+  ].filter(Boolean).join(' ');
+}
+
+function collectImportanceSignals(item) {
+  const lowerText = getItemText(item).toLowerCase();
+  const matches = [];
+  for (const signal of IMPORTANCE_SIGNALS) {
+    if (lowerText.includes(signal.token)) {
+      matches.push(signal);
+    }
+  }
+  return matches;
+}
+
+function rankNewsItems(items) {
+  const signalCounts = new Map();
+  const signalsByKey = new Map();
+
+  for (const item of items) {
+    const key = `${item.title}|${item.link}`;
+    const signals = collectImportanceSignals(item);
+    signalsByKey.set(key, signals);
+    for (const signal of new Set(signals.map(s => s.label))) {
+      signalCounts.set(signal, (signalCounts.get(signal) || 0) + 1);
+    }
+  }
+
+  const now = Date.now();
+  return items.map(item => {
+    const key = `${item.title}|${item.link}`;
+    const signals = signalsByKey.get(key) || [];
+    const labels = [...new Set(signals.map(signal => signal.label))];
+    const repeatedSignals = labels.filter(label => (signalCounts.get(label) || 0) > 1);
+    const sourceScore = SOURCE_IMPORTANCE_WEIGHTS.get(item.source) || 2;
+    const signalScore = signals.reduce((sum, signal) => sum + signal.weight, 0);
+    const repeatedScore = repeatedSignals.length * 3;
+    const ageHours = Number.isFinite(item._timestamp) ? Math.max(0, (now - item._timestamp) / 36e5) : 24;
+    const recencyScore = Math.max(0, 6 - ageHours / 10);
+    const priorityScore = Math.round(sourceScore + signalScore + repeatedScore + recencyScore);
+    const reasonParts = [
+      labels.slice(0, 3).join('/'),
+      repeatedSignals.length ? `多源信号:${repeatedSignals.slice(0, 2).join('/')}` : '',
+      sourceScore >= 6 ? '高质量源' : '',
+    ].filter(Boolean);
+
+    return {
+      ...item,
+      _priorityScore: priorityScore,
+      _priorityReason: reasonParts.join('，') || '时间较新/材料补充',
+    };
+  }).sort((a, b) => {
+    if (b._priorityScore !== a._priorityScore) return b._priorityScore - a._priorityScore;
+    return b._timestamp - a._timestamp;
+  });
+}
+
 function selectWithSourceCap(items, limit, maxPerSource, exclude = new Set(), counts = new Map()) {
   const selected = [];
 
@@ -150,20 +268,23 @@ function formatSourceDistribution(items) {
     .join(', ');
 }
 
-function selectNewsForPrompt(newsItems, maxNews = 30) {
+function selectNewsForPrompt(newsItems, maxNews = PROMPT_NEWS_LIMIT) {
   const internationalItems = newsItems.filter(item => !CN_SOURCES.has(item.source));
   const cnItems = newsItems.filter(item => CN_SOURCES.has(item.source));
   const selectedKeys = new Set();
   const selectedCounts = new Map();
 
-  const selected = selectWithSourceCap(internationalItems, Math.min(12, maxNews), 5, selectedKeys, selectedCounts);
+  const selected = selectWithSourceCap(internationalItems, Math.min(18, maxNews), 6, selectedKeys, selectedCounts);
   selected.push(...selectWithSourceCap(cnItems, maxNews - selected.length, 4, selectedKeys, selectedCounts));
 
   if (selected.length < maxNews) {
-    selected.push(...selectWithSourceCap(newsItems, maxNews - selected.length, 5, selectedKeys, selectedCounts));
+    selected.push(...selectWithSourceCap(newsItems, maxNews - selected.length, 6, selectedKeys, selectedCounts));
   }
 
-  selected.sort((a, b) => b._timestamp - a._timestamp);
+  selected.sort((a, b) => {
+    if (b._priorityScore !== a._priorityScore) return b._priorityScore - a._priorityScore;
+    return b._timestamp - a._timestamp;
+  });
   console.log(`[取样] 用于生成: ${selected.length} 条（国际 ${selected.filter(item => !CN_SOURCES.has(item.source)).length}，中文 ${selected.filter(item => CN_SOURCES.has(item.source)).length}）`);
   console.log(`[取样] 来源分布: ${formatSourceDistribution(selected)}`);
   return selected.slice(0, maxNews);
@@ -238,24 +359,26 @@ async function fetchNews(targetDate) {
     if (isNaN(tb)) return -1;
     return tb - ta;
   });
-  return allItems;
+  return rankNewsItems(allItems);
 }
 
 // ============ 生成日报 ============
 async function generateReport(newsItems) {
-  const MAX_NEWS = 30;
+  const MAX_NEWS = PROMPT_NEWS_LIMIT;
   const truncated = newsItems.length > MAX_NEWS;
   if (truncated) {
     console.log(`[提示] 新闻共 ${newsItems.length} 条，取前 ${MAX_NEWS} 条用于生成`);
   }
 
   const newsText = newsItems.slice(0, MAX_NEWS).map((item, i) =>
-    `${i + 1}. [${item.source}] ${item.title}\n   链接: ${item.link}\n   摘要: ${item.snippet}`
+    `${i + 1}. [${item.source}] ${item.title}\n   重要性线索: ${item._priorityReason || '材料覆盖'}\n   链接: ${item.link}\n   摘要: ${(item.snippet || '').slice(0, PROMPT_SNIPPET_CHARS)}`
   ).join('\n\n');
 
-  const prompt = `你是一位兼具社会学家和精神分析师视角的观察者。你的任务是从近期新闻中，挖掘这个时代的集体心理、以及人们精神世界。
+  const prompt = `你是一位兼具社会学家和精神分析师视角的信息观察者。你的任务是从近期新闻中，广泛捕捉这个时代的集体心理、社会关系和精神世界。
 
 是透过事件看到人心的人。
+
+核心目标：优先保证信息广度和信号覆盖。不要把日报写成一篇长论文；用短观察连接多个材料，让读者看到今天社会心理和生活现场的整体轮廓。
 
 近期新闻源：
 ${newsText}
@@ -264,39 +387,41 @@ ${newsText}
 1. 不要输出文章总标题，标题会由 Hexo frontmatter 提供
 2. 使用 Markdown 二级标题组织结构。以下板块按顺序输出：
    ## 今日关键词（固定输出）
-   ## 时代切片（固定输出）
+   ## 今日信号（固定输出）
+   ## 关系透视（有足够素材时输出）
+   ## 心理地貌（有足够素材时输出）
+   ## 生活现场（有足够素材时输出）
+   ## 时代精神（有足够素材时输出）
    ## 时代回响（固定输出）
-   ## 关系透视（有足够素材时输出，至少2条关联新闻）
-   ## 心理地貌（有足够素材时输出，至少2条关联新闻）
-   ## 时代精神（有足够素材时输出，至少2条关联新闻）
-   ## 一面镜子（有足够素材时输出，至少2条关联新闻）
 3. 各板块说明：
-   - **今日关键词**：2-5个词或短语，一行一个，格式：\`- **关键词** — 一句话注解\`。勾勒今日情绪地图，让读者一眼看到今天的主题脉络。不展开。
-   - **时代切片**：标题必须带副标题，格式 \`## 时代切片：副标题\`。选择1-2条新闻，重点不是事件本身，而是它揭示了什么样的集体心理。至少有一个 **加粗的关键洞察句**。固定输出，哪怕只有一条新闻也可以写。
-   - **时代回响**：2-4句话收束全文。不需要新素材，把前文的线索编织起来，给出一个有力的收尾观察。像一个朋友聊完天后最后的沉默片刻。固定输出。
-   - **关系透视**：标题必须带副标题。社会关系的变化——亲密关系的形态、代际之间的张力、个体与群体的博弈、信任/疏离模式。素材不足则跳过。
-   - **心理地貌**：标题必须带副标题。这个时代人们普遍的心理状态——焦虑的来源、逃避的方式、自我认同的困境、意义感的缺失或重建。素材不足则跳过。
-   - **时代精神**：标题必须带副标题。正在形成或瓦解的集体信念、价值排序的位移、"什么是好的生活"的定义正在如何被改写。素材不足则跳过。
-   - **一面镜子**：标题必须带副标题。一个问题或观察，让读者停下来想一想自己：你是否也在这个模式里？你真正想要的是什么？素材不足则跳过。
-4. 对每条分析，请遵循深度分析结构：
-   （1）事件概述
-   （2）反映的心理/社会机制（为什么会出现这种现象？背后是什么样的心理需求或社会动力？）
-   （3）与当下时代精神的关联（这个现象和更大的时代背景有什么联系？）
+   - **今日关键词**：4-8个词或短语，一行一个，格式：\`- **关键词** — 一句话注解\`。勾勒今日情绪地图，不展开。
+   - **今日信号**：选择5-10条值得知道的材料。每条格式：\`- **事件/现象**：一句话概述 + 一句话说明它折射的心理或社会关系。\`
+   - **关系透视**：亲密关系、代际、信任/疏离、个体与群体。用短段落或项目符号覆盖多条信息。
+   - **心理地貌**：焦虑、孤独、自我认同、防御机制、意义感。重点是抓到多种心理信号。
+   - **生活现场**：消费、工作、教育、城市、家庭、娱乐、公共讨论等日常经验的变化。
+   - **时代精神**：价值排序、生活理想、集体信念的形成或瓦解。不要过度理论化。
+   - **时代回响**：3-6句话收束全文，把前文线索编织起来，给出一个有力但不冗长的观察。
+4. 对每条分析，请遵循轻分析结构：
+   （1）发生了什么
+   （2）它折射了什么心理/社会关系
+   （3）为什么值得继续看
 5. 格式：
    - 板块之间不要使用 \`---\` 分割线。用自然段落过渡。
-   - 每个板块至少2处 **加粗关键句或关键词**，帮助读者快速扫读
-   - 不使用编号列表（1. 2. 3.），用自然段落和加粗标签组织
+   - 使用项目符号和短段落，帮助快速扫读
+   - 每个输出板块至少2处 **加粗关键句或关键词**
+   - 不使用编号列表（1. 2. 3.）
 6. 风格：
    - 像一个深夜和你聊天的朋友，聪明、真诚、不装
    - 像读弗洛姆或韩炳哲的书，但更口语化、更接地气
    - 不要学术腔，但要有思想深度
    - 敢于指出人们自欺的地方，但不居高临下
+   - 信息密度要高，观点短而准，不要为追求深度把少数素材写得过长
 7. 核心关注：
    - 人的心理：欲望、恐惧、防御机制、自我欺骗、身份焦虑、孤独感、亲密渴望
    - 社会关系：亲密与疏离、控制与依赖、表演与真实、信任崩塌与重建
    - 时代精神：这个时代的人在追求什么？在逃避什么？在集体性地遗忘什么？
 8. 严格排除：不要写政治、国际关系、军事、外交、政党相关内容。只关注人的心理和社会关系。
-9. 总字数控制在2000-3500字。每个输出的板块不少于400字（今日关键词除外，50-100字即可）。
+9. 长度不作为硬目标。素材多可以写长，素材少就保持简洁；宁可覆盖更多社会心理信号，也不要为了凑字扩写。
 10. 不要编造来源；不要输出参考来源列表，脚本会自动追加
 11. 直接输出文章内容，不要加markdown代码块标记`;
 
@@ -321,14 +446,13 @@ async function checkQuality(report, dateStrCN) {
   const checkPrompt = `评估以下社会思想日报的质量。只需回复"PASS"或"FAIL: <原因>"。
 
 检查标准：
-1. 是否有"今日关键词"板块？是否包含2-5个关键词？
-2. 是否有"时代回响"收尾板块？
-3. 各内容板块标题是否带有副标题（格式：## 板块名：副标题）？
-4. 总字数是否在2000-3500字之间？
-5. 每个板块是否有实质性分析（不是简单的新闻概括）？
-6. 是否避免了政治、国际关系、军事、外交内容？
-7. 分析是否有思想深度（非表面描述）？
-8. 板块之间是否避免了 --- 分割线？
+1. 是否有"今日关键词"板块？是否包含至少4个关键词？
+2. 是否有"今日信号"板块？是否覆盖至少5条材料或现象？
+3. 是否有"时代回响"收尾板块？
+4. 是否覆盖多个社会心理方向，而不是只围绕1-2条材料展开？
+5. 是否避免了政治、国际关系、军事、外交内容？
+6. 是否避免了参考来源列表、markdown代码块和 --- 分割线？
+7. 字数长短、分析深度不作为失败理由；只在结构明显缺失、信息覆盖明显过窄或明显跑题时 FAIL。
 
 文章内容：
 ${report.slice(0, 4000)}`;
@@ -355,22 +479,50 @@ ${report.slice(0, 4000)}`;
 }
 
 function localQualityCheck(report) {
+  function extractSection(heading) {
+    const lines = report.split(/\r?\n/);
+    const headingPattern = new RegExp(`^##\\s+${heading}(?:\\s|：|:|$)`);
+    const start = lines.findIndex(line => headingPattern.test(line));
+    if (start === -1) return '';
+    const next = lines.findIndex((line, index) => index > start && /^##\s+/.test(line));
+    return lines.slice(start, next === -1 ? undefined : next).join('\n');
+  }
+
   const plainText = report
     .replace(/```[\s\S]*?```/g, '')
     .replace(/[#>*_`[\]()!\-]/g, '')
     .replace(/\s+/g, '');
   const sectionCount = (report.match(/^##\s+/gm) || []).length;
+  const keywordLineCount = (report.match(/^\s*-\s+\*\*.+?\*\*\s*[—-]/gm) || []).length;
+  const signalSection = extractSection('今日信号');
+  const signalLineCount = (signalSection.match(/^\s*-\s+\*\*.+?\*\*[：:]/gm) || []).length;
 
-  if (plainText.length < 2000) {
-    return { pass: false, reason: `正文过短：${plainText.length} 字，少于 2000 字` };
-  }
-
-  if (plainText.length > 4500) {
-    return { pass: false, reason: `正文过长：${plainText.length} 字，超过 4500 字上限` };
+  if (plainText.length < 700) {
+    return { pass: false, reason: `正文异常过短：${plainText.length} 字，可能生成不完整` };
   }
 
   if (sectionCount < 3) {
     return { pass: false, reason: `板块过少：${sectionCount} 个，少于 3 个` };
+  }
+
+  if (!/^##\s+今日关键词/m.test(report)) {
+    return { pass: false, reason: '缺少今日关键词板块' };
+  }
+
+  if (!/^##\s+今日信号/m.test(report)) {
+    return { pass: false, reason: '缺少今日信号板块' };
+  }
+
+  if (!/^##\s+时代回响/m.test(report)) {
+    return { pass: false, reason: '缺少时代回响板块' };
+  }
+
+  if (keywordLineCount < 3) {
+    return { pass: false, reason: `关键词过少：${keywordLineCount} 个，少于 3 个` };
+  }
+
+  if (signalLineCount < 4) {
+    return { pass: false, reason: `今日信号过少：${signalLineCount} 条，少于 4 条` };
   }
 
   return { pass: true, reason: '本地硬检查通过' };
@@ -422,7 +574,8 @@ function scoreReport(report) {
     .replace(/[#>*_`[\]()!\-]/g, '')
     .replace(/\s+/g, '');
   const sectionCount = (report.match(/^##\s+/gm) || []).length;
-  return plainText.length + sectionCount * 200;
+  const bulletCount = (report.match(/^\s*[-*]\s+/gm) || []).length;
+  return Math.min(plainText.length, 2200) + sectionCount * 500 + bulletCount * 80;
 }
 
 function formatErrorMessage(err) {
