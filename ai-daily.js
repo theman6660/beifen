@@ -169,6 +169,24 @@ const AI_KEYWORDS = [
   'diffusion',
   'inference',
   'reasoning model',
+  'frontier model',
+  'foundation model',
+  'coding agent',
+  'agentic',
+  'copilot',
+  'cursor',
+  'windsurf',
+  'perplexity',
+  'xai',
+  'grok',
+  'sora',
+  'llama',
+  'qwen',
+  'kimi',
+  'moonshot',
+  'runway',
+  'midjourney',
+  'stable diffusion',
   'ai agent',
   'aigc',
   '人工智能',
@@ -178,6 +196,13 @@ const AI_KEYWORDS = [
   '多模态',
   '智能体',
   '机器人',
+  '智能助手',
+  '代码助手',
+  '编程助手',
+  '推理模型',
+  '基础模型',
+  '前沿模型',
+  '世界模型',
   '自动驾驶',
   '无人车',
   '具身',
@@ -381,6 +406,9 @@ async function fetchNews() {
 
       const relevantItems = datedItems
         .filter(item => !source.requireAIKeyword || isAIRelevantItem(item));
+      const filteredItems = source.requireAIKeyword
+        ? datedItems.filter(item => !isAIRelevantItem(item))
+        : [];
 
       const recentItems = relevantItems
         .map(item => ({
@@ -393,7 +421,14 @@ async function fetchNews() {
         }));
 
       const filteredOut = datedItems.length - relevantItems.length;
+      const filteredSample = filteredItems
+        .slice(0, 3)
+        .map(item => (item.title || '(无标题)').replace(/\s+/g, ' ').slice(0, 80))
+        .join('；');
       console.log(`  -> ${source.name}：获取 ${recentItems.length} 条${filteredOut > 0 ? `，过滤 ${filteredOut} 条非AI素材` : ''}`);
+      if (filteredSample) {
+        console.log(`     过滤样例: ${filteredSample}`);
+      }
       return recentItems;
     })
   );

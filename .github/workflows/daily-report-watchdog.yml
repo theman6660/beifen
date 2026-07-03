@@ -2,9 +2,9 @@ name: Daily Report Watchdog
 
 on:
   schedule:
-    # Beijing 08:47-20:47 catch-up window. The main pipeline is idempotent,
+    # Beijing 08:32-20:47 catch-up window. The main pipeline is idempotent,
     # so repeated checks are cheap and skip once today's posts exist.
-    - cron: '47 0-12 * * *'
+    - cron: '32,47 0-12 * * *'
   workflow_dispatch:
 
 permissions:
