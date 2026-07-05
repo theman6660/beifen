@@ -10,7 +10,9 @@
     "clean": "hexo clean",
     "deploy": "hexo deploy",
     "server": "hexo server",
-    "sentinel:daily-report": "node tools/railway-daily-report-sentinel.js"
+    "sentinel:cloudflare:check": "node --check workers/daily-report-sentinel/src/index.js",
+    "sentinel:cloudflare:dev": "npx wrangler dev --config workers/daily-report-sentinel/wrangler.toml",
+    "sentinel:cloudflare:deploy": "npx wrangler deploy --config workers/daily-report-sentinel/wrangler.toml"
   },
   "hexo": {
     "version": "8.1.1"

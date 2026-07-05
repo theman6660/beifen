@@ -6,6 +6,7 @@ node_modules/
 public/
 .deploy*/
 .local-artifacts/
+workers/**/.wrangler/
 hexo-scripts/
 # 临时文件 — 不要提交草稿和测试图片
 agent-report*.md

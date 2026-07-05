@@ -1,0 +1,11 @@
+name = "daily-report-sentinel"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[vars]
+DAILY_REPORT_REPO = "theman6660/beifen"
+DAILY_REPORT_BRANCH = "main"
+DAILY_REPORT_WORKFLOW = "daily-report.yml"
+
+[triggers]
+crons = ["0 1,3,5,7,9,11 * * *"]
