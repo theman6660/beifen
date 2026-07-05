@@ -25,6 +25,14 @@ Cron 使用 UTC 时间。当前配置：
 对应北京时间 09:00、11:00、13:00、15:00、17:00、19:00。脚本是幂等的：
 当天两篇日报已存在时会直接退出，所以多跑几次是安全的。
 
+Worker URL:
+
+```text
+https://daily-report-sentinel.theman6660-daily-report.workers.dev
+```
+
+`workers_dev` 已开启用于健康检查和手动 dry-run，Preview URLs 已关闭。
+
 ## Deploy
 
 先登录 Cloudflare：
@@ -75,4 +83,3 @@ curl "http://localhost:8787/run?dryRun=1&date=2099-01-01"
 ```bash
 Authorization: Bearer <MANUAL_TRIGGER_TOKEN>
 ```
-

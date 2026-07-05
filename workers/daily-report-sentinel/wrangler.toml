@@ -1,6 +1,8 @@
 name = "daily-report-sentinel"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
+workers_dev = true
+preview_urls = false
 
 [vars]
 DAILY_REPORT_REPO = "theman6660/beifen"
