@@ -490,9 +490,9 @@ ${newsText}
 3. 各板块说明与格式：
    - **今日速览**：5-10条要点，每条一行。格式：\`- **关键词**：一句话说明发生了什么，以及为什么值得知道\`。覆盖模型、产品、公司、资本、监管、开源/研究等不同方向。
    - **重点信号**：选择最重要的3-5条。每条使用以下结构，用加粗标签分隔：
-     **信息**：1-2句话概述。
-     **看点**：1-2句话说明重要性或后续影响。
-     不要写成长篇专题，每条重点信号之间用 \`---\` 分隔线隔开。
+      - **信息**：1-2句话概述。
+        **看点**：1-2句话说明重要性或后续影响。
+      不要写成长篇专题；每条重点信号用项目符号分隔，不要使用 \`---\`、\`***\`、\`___\` 等裸分隔线，它们会被 Markdown 渲染成大标题。
    - 行业动态：竞争格局、巨头动作、市场趋势。用短段落或项目符号覆盖多条信息，不要求每条长分析。
    - 技术进展：模型、开源、论文、基准、工具链、硬件。优先多覆盖，不必逐条深入。
    - 商业动态：融资、IPO、收购、产品发布、客户落地。优先覆盖信息面。
@@ -571,6 +571,10 @@ function localQualityCheck(report) {
   const sectionCount = (report.match(/^##\s+/gm) || []).length;
   const overviewLineCount = (report.match(/^\s*-\s+\*\*.+?\*\*[：:]/gm) || []).length;
 
+  if (hasUnsafeMarkdownSeparator(report)) {
+    return { pass: false, reason: '正文包含裸 Markdown 分隔线，可能被 Hexo 渲染成异常大标题' };
+  }
+
   if (plainText.length < 800) {
     return { pass: false, reason: `正文异常过短：${plainText.length} 字，可能生成不完整` };
   }
@@ -592,6 +596,19 @@ function localQualityCheck(report) {
   }
 
   return { pass: true, reason: '本地硬检查通过' };
+}
+
+function hasUnsafeMarkdownSeparator(report) {
+  return report
+    .split(/\r?\n/)
+    .some(line => /^\s{0,3}[-*_]{3,}\s*$/.test(line));
+}
+
+function stripUnsafeMarkdownSeparators(report) {
+  return report
+    .split(/\r?\n/)
+    .filter(line => !/^\s{0,3}[-*_]{3,}\s*$/.test(line))
+    .join('\n');
 }
 
 const SOURCE_COVERAGE_THRESHOLDS = {
@@ -723,13 +740,13 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
 }
 
 function normalizeReport(report, title) {
-  return report
+  return stripUnsafeMarkdownSeparators(report
     .replace(/^```(?:markdown)?\s*/i, '')
     .replace(/```\s*$/i, '')
     .split(/\r?\n/)
     .filter((line, index) => !(index === 0 && line.trim() === title))
     .join('\n')
-    .trim();
+  ).trim();
 }
 
 function buildSourceList(newsItems, maxSources = 30) {
