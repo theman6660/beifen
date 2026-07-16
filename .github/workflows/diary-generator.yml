@@ -2,11 +2,16 @@ name: Diary Generator
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: Regenerate the diary date carried by the private payload
+        required: false
+        default: false
+        type: boolean
   schedule:
-    - cron: '15 14 * * *'   # UTC 14:15 = 北京 22:15 (给snippets推送留几分钟)
+    - cron: '15 14 * * *'
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: site-content-push
@@ -16,112 +21,61 @@ jobs:
   generate-diary:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
     outputs:
       changed: ${{ steps.commit.outputs.changed }}
+      source_sha: ${{ steps.commit.outputs.source_sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Pull latest changes
+      - uses: actions/checkout@v6
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v6
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - name: Sync latest source branch
+        run: git pull --ff-only origin main
+      - name: Require private dated snippet payload
+        env:
+          DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
         run: |
-          git stash --include-untracked 2>/dev/null || true
-          git pull --rebase origin main
-          git stash pop 2>/dev/null || true
-
-      - name: Generate Diary
+          if [ -z "$DIARY_SNIPPETS_JSON" ]; then
+            echo "DIARY_SNIPPETS_JSON must contain {date, snippets}; raw snippets are never read from the repository."
+            exit 1
+          fi
+      - name: Generate diary from private input
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-        run: node diary-generator.js
-        timeout-minutes: 10
-
-      - name: Commit and push
+          DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
+          MODEL: deepseek-v4-pro
+          FORCE_RUN: ${{ inputs.force || 'false' }}
+        run: |
+          args=()
+          if [ "$FORCE_RUN" = "true" ]; then args+=(--force); fi
+          node diary-generator.js "${args[@]}"
+      - name: Commit diary only
         id: commit
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          diary_generated=false
-          shopt -s nullglob
-          for f in source/_posts/diary-*.md; do
-            git add "$f"
-            diary_generated=true
-          done
-          shopt -u nullglob
-
-          git add data/snippets/ 2>/dev/null || true
-
+          set -euo pipefail
+          git add source/_posts/diary-*.md
           if git diff --staged --quiet; then
-            echo "无变更，跳过提交"
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$diary_generated" = true ]; then
-            git commit -m "docs: 日记 $(date +%Y-%m-%d)"
           else
-            git commit -m "chore: 更新 snippets $(date +%Y-%m-%d)"
+            date=$(git diff --cached --name-only | sed -n 's#source/_posts/diary-\([0-9-]*\)\.md#\1#p' | tail -1)
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "docs: 日记 ${date}"
+            git push origin HEAD:main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
-          git push
-          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   deploy-site:
     needs: generate-diary
     if: needs.generate-diary.outputs.changed == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - run: npm ci
-
-      - name: Build and deploy
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          git config --global user.name "theman6660"
-          git config --global user.email "theman6660@users.noreply.github.com"
-
-          npx hexo clean
-          npx hexo generate
-
-          if [ ! -f public/index.html ]; then
-            echo "构建失败：public/index.html 不存在"
-            exit 1
-          fi
-          if [ ! -s public/index.html ]; then
-            echo "构建失败：public/index.html 为空"
-            exit 1
-          fi
-
-          PAGES_DIR="$(mktemp -d)"
-          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$PAGES_DIR"
-          rsync -a --delete --exclude '.git' public/ "$PAGES_DIR"/
-
-          cd "$PAGES_DIR"
-          git add -A
-
-          if git diff --staged --quiet; then
-            echo "无变更，跳过部署"
-          else
-            now=$(date +%Y-%m-%d)
-            git commit -m "deploy diary $now"
-            git push origin main
-            echo "✅ 日记部署完成"
-          fi
+    permissions:
+      contents: write
+    uses: ./.github/workflows/_site-deploy.yml
+    with:
+      ref: main
+      reason: diary ${{ needs.generate-diary.outputs.source_sha }}
+    secrets: inherit

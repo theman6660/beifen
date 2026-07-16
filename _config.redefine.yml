@@ -99,8 +99,8 @@ global:
   # Whether to enable open graph
   open_graph:
     enable: true
-    image: /images/redefine-og.webp  # default og:image
-    description: Hexo Theme Redefine, Redefine Your Hexo Journey.
+    image: /images/og-cover.jpg  # default og:image
+    description: 韩小凡的个人网站：AI、技术实验、阅读写作与对时代生活的观察。
   # Google Analytics
   google_analytics:
     enable: false # Whether to enable Google Analytics
@@ -220,6 +220,11 @@ navbar:
     分类:
       path: /categories
       icon: fa-regular fa-folder
+    日报:
+      icon: fa-regular fa-newspaper
+      submenus:
+        AI行业日报: /categories/AI日报/
+        社会思想日报: /categories/社会日报/
     # Status: 
     #   path: https://status.ohevan.com/
     #   icon: fa-regular fa-chart-bar
@@ -242,7 +247,7 @@ navbar:
     # Whether to enable
     enable: true
     # Preload search data when the page loads
-    preload: true
+    preload: false
 # NAVIGATION BAR <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< end
 
 
@@ -254,7 +259,7 @@ home:
     enable: true # Whether to enable sidebar
     position: left # Sidebar position. left, right
     first_item: info # First item in sidebar. menu, info
-    announcement: # Announcement text
+    announcement: 首页优先展示个人精选；每日自动更新请从「日报」导航进入。
     show_on_mobile: true # Whether to show sidebar navigation on mobile sheet menu
     links: {}
   # Article date format
@@ -315,11 +320,11 @@ articles:
       url: # Font URL to CSS file
   # Table of contents settings
   toc:
-    enable: false # Whether to enable TOC
+    enable: true # Whether to enable TOC
     max_depth: 3 # TOC depth
     number: false # Whether to add number to TOC automatically
     expand: true # Whether to expand TOC
-    init_open: true # Open toc by default
+    init_open: false # Open toc by default
   # Whether to enable copyright notice
   copyright:
     enable: false # Whether to enable
@@ -426,15 +431,13 @@ footer:
 # Docs: https://redefine-docs.ohevan.com/inject
 inject:
   # Whether to enable inject
-  enable: false
+  enable: true
   # Inject custom head html code
-  head: 
-    -
-    -
+  head:
+    - '<link rel="stylesheet" href="/css/accessibility.css">'
   # Inject custom footer html code
   footer:
-    -
-    -
+    - '<script src="/js/accessibility.js" defer></script>'
 # INJECT <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<< end
 
 
@@ -443,7 +446,7 @@ inject:
 plugins:
   # RSS feed. Requires hexo-generator-feed (npm i hexo-generator-feed). See https://github.com/hexojs/hexo-generator-feed
   feed:
-    enable: false # Whether to enable
+    enable: true # Whether to enable
   # Aplayer. See https://github.com/DIYgod/APlayer
   aplayer:
     enable: false # Whether to enable

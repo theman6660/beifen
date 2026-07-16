@@ -7,24 +7,28 @@
   },
   "scripts": {
     "build": "hexo generate",
+    "check": "node tools/check-source-safety.js && node tools/validate-daily-posts.js && node --check ai-daily.js && node --check society-daily.js && node --check diary-generator.js && node --check lib/markdown-safety.js && node --check tools/write-deploy-status.js && node --check source/js/accessibility.js && node --check workers/daily-report-sentinel/src/index.js",
     "clean": "hexo clean",
-    "deploy": "hexo deploy",
+    "deploy": "pwsh -NoProfile -File tools/request-site-redeploy.ps1",
     "server": "hexo server",
+    "test": "node --test",
     "sentinel:cloudflare:check": "node --check workers/daily-report-sentinel/src/index.js",
-    "sentinel:cloudflare:dev": "npx wrangler dev --config workers/daily-report-sentinel/wrangler.toml",
-    "sentinel:cloudflare:deploy": "npx wrangler deploy --config workers/daily-report-sentinel/wrangler.toml"
+    "sentinel:cloudflare:dev": "wrangler dev --config workers/daily-report-sentinel/wrangler.toml",
+    "sentinel:cloudflare:deploy": "wrangler deploy --config workers/daily-report-sentinel/wrangler.toml",
+    "sentinel:cloudflare:dry-run": "wrangler deploy --dry-run --config workers/daily-report-sentinel/wrangler.toml"
   },
   "hexo": {
-    "version": "8.1.1"
+    "version": "8.1.2"
   },
   "dependencies": {
     "dotenv": "^16.4.0",
-    "hexo": "^8.0.0",
-    "hexo-deployer-git": "^4.0.0",
+    "hexo": "^8.1.2",
     "hexo-generator-archive": "^2.0.0",
     "hexo-generator-category": "^2.0.0",
+    "hexo-generator-feed": "^4.0.0",
     "hexo-generator-index": "^4.0.0",
     "hexo-generator-searchdb": "^1.5.0",
+    "hexo-generator-sitemap": "^3.0.1",
     "hexo-generator-tag": "^2.0.0",
     "hexo-renderer-ejs": "^2.0.0",
     "hexo-renderer-marked": "^7.0.0",
@@ -33,8 +37,11 @@
     "hexo-theme-landscape": "^1.0.0",
     "hexo-theme-redefine": "^2.9.0",
     "hexo-wordcount": "^6.0.1",
-    "https-proxy-agent": "^9.0.0",
+    "https-proxy-agent": "^9.1.0",
     "openai": "^4.104.0",
     "rss-parser": "^3.13.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.111.0"
   }
 }

@@ -1,8 +1,11 @@
 # Cloudflare Daily Report Sentinel
 
-这个 Worker 是个人网站日报的外部云端兜底。它不生成日报，只检查 `beifen`
-源仓库里当天两篇 ISO 日报是否存在；如果缺失，就触发现有 GitHub Actions
-workflow `daily-report.yml`。
+这个 Worker 是个人网站日报的外部云端兜底。它不生成日报，而是同时检查两层状态：
+
+1. `beifen` 源仓库里当天两篇 ISO 日报是否存在；缺失时触发 `daily-report.yml`。
+2. `hanxiaofan.site/daily-report-status.json` 是否对应最新源码提交，且两篇线上文章可访问；不一致时触发 `manual-site-redeploy.yml`。
+
+因此“源码已经提交、Pages 部署却失败”不会再被误判为成功。
 
 ## Why Cloudflare
 
@@ -23,7 +26,7 @@ Cron 使用 UTC 时间。当前配置：
 ```
 
 对应北京时间 09:00、11:00、13:00、15:00、17:00、19:00。脚本是幂等的：
-当天两篇日报已存在时会直接退出，所以多跑几次是安全的。
+源码与线上部署都一致时会直接退出，所以多跑几次是安全的。
 
 Worker URL:
 
@@ -47,7 +50,7 @@ npx wrangler login
 npx wrangler secret put GITHUB_TOKEN --config workers/daily-report-sentinel/wrangler.toml
 ```
 
-这个 token 需要能读取 `theman6660/beifen` 内容，并触发 Actions workflow。
+这个 token 需要能读取 `theman6660/beifen` 内容，并触发两个恢复 workflow。
 经典 PAT 可用 `repo` 权限；细粒度 token 至少需要目标仓库的 contents read
 和 actions write 权限。
 
@@ -63,6 +66,7 @@ npm run sentinel:cloudflare:deploy
 
 ```bash
 npm run sentinel:cloudflare:check
+npm run sentinel:cloudflare:dry-run
 ```
 
 本地 dry run 可用 Wrangler dev，然后请求 `/run?dryRun=1`：

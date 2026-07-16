@@ -2,9 +2,9 @@ name: Daily Report Pipeline
 
 on:
   schedule:
-    - cron: '17 0 * * *'  # 北京时间 8:17，避开整点高峰
-    - cron: '17 3 * * *'  # Beijing 11:17 fallback if the first schedule is delayed or missed
-    - cron: '17 6 * * *'  # Beijing 14:17 final fallback; preflight skips if posts already exist
+    - cron: '17 0 * * *'
+    - cron: '17 3 * * *'
+    - cron: '17 6 * * *'
   workflow_dispatch:
     inputs:
       force:
@@ -13,8 +13,7 @@ on:
         default: false
         type: boolean
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: site-content-push
@@ -23,6 +22,8 @@ concurrency:
 jobs:
   preflight:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       date: ${{ steps.bj-date.outputs.date }}
       should_run: ${{ steps.guard.outputs.should_run }}
@@ -32,7 +33,7 @@ jobs:
         run: |
           git fetch origin main
           git checkout --detach origin/main
-      - name: Compute Beijing date
+      - name: Compute Beijing date once
         id: bj-date
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
       - name: Decide whether to generate
@@ -41,17 +42,16 @@ jobs:
           FORCE_RUN: ${{ inputs.force || 'false' }}
           DATE: ${{ steps.bj-date.outputs.date }}
         run: |
-          AI="source/_posts/ai-daily-$DATE.md"
-          SOC="source/_posts/society-daily-$DATE.md"
+          set -euo pipefail
+          ai="source/_posts/ai-daily-$DATE.md"
+          society="source/_posts/society-daily-$DATE.md"
           if [ "$FORCE_RUN" = "true" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "🔁 force=true，重新生成今日日报"
-          elif [ -f "$AI" ] && [ -f "$SOC" ]; then
+          elif [ -f "$ai" ] && [ -f "$society" ]; then
             echo "should_run=false" >> "$GITHUB_OUTPUT"
-            echo "✅ 今日日报已存在，跳过重复定时生成: $AI, $SOC"
+            echo "Today's source posts already exist; watchdog will independently verify the live deployment."
           else
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "📄 今日日报尚未齐全，开始生成"
           fi
 
   ai-daily:
@@ -59,10 +59,12 @@ jobs:
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
-        with: { node-version: '22', cache: 'npm' }
+        with: { node-version: '22', cache: npm }
       - run: npm ci
       - name: Generate AI Daily
         env:
@@ -75,9 +77,7 @@ jobs:
           CHRONICLE_ENTRY_FILE: .local-artifacts/ai-chronicle-entry.md
         run: |
           args=(--no-deploy)
-          if [ "$FORCE_RUN" = "true" ]; then
-            args+=(--force)
-          fi
+          if [ "$FORCE_RUN" = "true" ]; then args+=(--force); fi
           node ai-daily.js "${args[@]}"
       - uses: actions/upload-artifact@v7
         with:
@@ -95,10 +95,12 @@ jobs:
     if: needs.preflight.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
-        with: { node-version: '22', cache: 'npm' }
+        with: { node-version: '22', cache: npm }
       - run: npm ci
       - name: Generate Society Daily
         env:
@@ -111,9 +113,7 @@ jobs:
           FORCE_RUN: ${{ inputs.force || 'false' }}
         run: |
           args=(--no-deploy)
-          if [ "$FORCE_RUN" = "true" ]; then
-            args+=(--force)
-          fi
+          if [ "$FORCE_RUN" = "true" ]; then args+=(--force); fi
           node society-daily.js "${args[@]}"
       - uses: actions/upload-artifact@v7
         with:
@@ -121,27 +121,25 @@ jobs:
           path: source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md
           if-no-files-found: error
 
-  deploy:
+  commit-source:
     needs: [preflight, ai-daily, society-daily]
     if: always() && !cancelled() && needs.preflight.outputs.should_run == 'true' && needs.ai-daily.result == 'success' && needs.society-daily.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      source_sha: ${{ steps.commit.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-
       - uses: actions/setup-node@v6
-        with: { node-version: '22', cache: 'npm' }
-
+        with: { node-version: '22', cache: npm }
       - run: npm ci
-
-      - name: Sync source branch
-        run: |
-          git stash --include-untracked 2>/dev/null || true
-          git pull --rebase origin main
-          git stash pop 2>/dev/null || true
-
+      - name: Sync latest source branch
+        run: git pull --ff-only origin main
       - uses: actions/download-artifact@v8
         with: { name: ai-posts, path: source/_posts/ }
       - uses: actions/download-artifact@v8
@@ -149,157 +147,37 @@ jobs:
       - uses: actions/download-artifact@v8
         with: { name: ai-chronicle-entry, path: .local-artifacts/chronicle-entry/ }
         continue-on-error: true
-
       - name: Apply AI chronicle entry to latest source
-        id: chronicle
         env:
           BJ_DATE: ${{ needs.preflight.outputs.date }}
+        run: node tools/apply-chronicle-entry.js --entry .local-artifacts/chronicle-entry/ai-chronicle-entry.md --chronicle source/_posts/ai-chronicle.md
+      - name: Validate generated source
         run: |
-          ENTRY=".local-artifacts/chronicle-entry/ai-chronicle-entry.md"
-          if [ -f "$ENTRY" ]; then
-            echo "entry_exists=true" >> "$GITHUB_OUTPUT"
-            echo "📄 编年史条目 artifact 存在"
-          else
-            echo "entry_exists=false" >> "$GITHUB_OUTPUT"
-            echo "ℹ 今日无编年史条目 artifact"
-          fi
-          node tools/apply-chronicle-entry.js --entry "$ENTRY" --chronicle source/_posts/ai-chronicle.md
-          echo "apply_status=$?" >> "$GITHUB_OUTPUT"
-
-      - name: Report chronicle status
-        if: always() && steps.chronicle.outputs.entry_exists == 'true'
+          test -s "source/_posts/ai-daily-${{ needs.preflight.outputs.date }}.md"
+          test -s "source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md"
+          node tools/validate-daily-posts.js
+      - name: Commit and push generated source
+        id: commit
         env:
-          ENTRY_EXISTS: ${{ steps.chronicle.outputs.entry_exists }}
-          APPLY_STATUS: ${{ steps.chronicle.outputs.apply_status }}
+          DATE: ${{ needs.preflight.outputs.date }}
         run: |
-          if [ "$APPLY_STATUS" != "0" ]; then
-            echo "### ⚠ 编年史条目写入异常" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 编年史条目 artifact 存在，但 apply-chronicle-entry.js 退出码为 $APPLY_STATUS" >> "$GITHUB_STEP_SUMMARY"
-            echo "- 日报已正常发布，请手动检查编年史" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "### ✅ 编年史处理完成" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Check today's files exist
-        run: |
-          AI="source/_posts/ai-daily-${{ needs.preflight.outputs.date }}.md"
-          SOC="source/_posts/society-daily-${{ needs.preflight.outputs.date }}.md"
-          MISSING=""
-          [ -f "$AI" ] || MISSING="$MISSING ai-daily"
-          [ -f "$SOC" ] || MISSING="$MISSING society-daily"
-          if [ -n "$MISSING" ]; then
-            echo "❌ 以下日报文件缺失: $MISSING"
-            echo "需要两份日报都存在才能部署。检查对应 job 日志排查生成失败原因。"
-            exit 1
-          fi
-          echo "📄 两份日报文件均已生成: ai-daily + society-daily"
-
-      - name: Validate today's frontmatter
-        run: |
-          echo "=== 检查今日文章的 frontmatter ==="
-          DATE="${{ needs.preflight.outputs.date }}"
-          errors=0
-          for f in "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md"; do
-            [ -f "$f" ] || continue
-            echo "检查: $f"
-            fm=$(sed -n '/^---$/,/^---$/p' "$f")
-            if [ -z "$fm" ]; then
-              echo "  ❌ 缺少 frontmatter"
-              errors=$((errors + 1))
-              continue
-            fi
-            ok=true
-            for field in title date; do
-              if ! echo "$fm" | grep -q "^${field}:"; then
-                echo "  ❌ 缺少必需字段: $field"
-                errors=$((errors + 1))
-                ok=false
-              fi
-            done
-            bad=$(echo "$fm" | grep -E '^[A-Za-z_-]+:[^[:space:]]' || true)
-            if [ -n "$bad" ]; then
-              echo "  ❌ YAML 字段格式错误（冒号后缺空格）: $bad"
-              errors=$((errors + 1))
-              ok=false
-            fi
-            if $ok; then
-              echo "  ✅ 通过"
-            fi
-          done
-          if [ $errors -gt 0 ]; then
-            echo "❌ 验证失败，$errors 个错误，中止部署"
-            exit 1
-          fi
-          echo "✅ 今日文章验证通过"
-
-      - name: Commit generated posts
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          DATE="${{ needs.preflight.outputs.date }}"
-          git add "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md" source/_posts/ai-chronicle.md 2>/dev/null || true
-          if git diff --staged --quiet; then
-            echo "生成文章无变更"
-          else
-            git config user.name "theman6660"
-            git config user.email "theman6660@users.noreply.github.com"
+          set -euo pipefail
+          git add "source/_posts/ai-daily-$DATE.md" "source/_posts/society-daily-$DATE.md" source/_posts/ai-chronicle.md
+          if ! git diff --staged --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "docs: 更新日报 $DATE"
-            git push "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/beifen.git" main
-            echo "✅ 生成文章已提交到源仓库"
+            git push origin HEAD:main
           fi
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Build and deploy
-        id: deploy
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          git config --global user.name "theman6660"
-          git config --global user.email "theman6660@users.noreply.github.com"
-
-          npx hexo clean
-          npx hexo generate
-
-          if [ ! -f public/index.html ]; then
-            echo "❌ 构建失败：public/index.html 不存在"
-            exit 1
-          fi
-          if [ ! -s public/index.html ]; then
-            echo "❌ 构建失败：public/index.html 为空"
-            exit 1
-          fi
-
-          remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
-          local_head=$(git rev-parse HEAD)
-          if [ "$remote_head" != "$local_head" ]; then
-            echo "❌ 源仓库 main 已在本次构建后发生变化，中止部署，避免用过时构建覆盖 Pages"
-            echo "Remote main: $remote_head"
-            echo "Local HEAD:  $local_head"
-            exit 1
-          fi
-
-          PAGES_DIR="$(mktemp -d)"
-          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$PAGES_DIR"
-          rsync -a --delete --exclude '.git' public/ "$PAGES_DIR"/
-
-          cd "$PAGES_DIR"
-          git add -A
-
-          if git diff --staged --quiet; then
-            echo "无变更，跳过部署"
-            echo "deployed=false" >> "$GITHUB_OUTPUT"
-          else
-            now=$(date +%Y-%m-%d)
-            git commit -m "deploy $now"
-            git push origin main
-            echo "deployed=true" >> "$GITHUB_OUTPUT"
-            echo "✅ 部署完成"
-          fi
-
-      - name: Tag deploy
-        if: steps.deploy.outputs.deployed == 'true'
-        env:
-          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
-        run: |
-          now=$(date +%Y-%m-%d-%H%M%S)
-          git tag "deploy-$now"
-          git push "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/beifen.git" "deploy-$now"
+  deploy-site:
+    needs: commit-source
+    if: needs.commit-source.result == 'success'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/_site-deploy.yml
+    with:
+      ref: main
+      reason: daily report ${{ needs.commit-source.outputs.source_sha }}
+    secrets: inherit

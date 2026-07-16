@@ -1,0 +1,175 @@
+name: Reusable Site Deploy
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Source ref to deploy
+        required: true
+        type: string
+      reason:
+        description: Why this deployment is running
+        required: false
+        default: automated deploy
+        type: string
+      confirm:
+        description: Required acknowledgement for non-main refs
+        required: false
+        default: ""
+        type: string
+    secrets:
+      DEPLOY_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout requested source
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Validate requested source
+        env:
+          SOURCE_REF: ${{ inputs.ref }}
+          CONFIRM_OVERWRITE: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$SOURCE_REF" = "main" ] || [ "$SOURCE_REF" = "refs/heads/main" ]; then
+            remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
+            local_head=$(git rev-parse HEAD)
+            if [ "$remote_head" != "$local_head" ]; then
+              echo "Refuse to deploy a stale main build."
+              echo "Remote main: $remote_head"
+              echo "Local HEAD:  $local_head"
+              exit 1
+            fi
+          elif [ "$CONFIRM_OVERWRITE" != "overwrite-pages" ]; then
+            echo "Refuse to deploy a non-main ref without explicit confirmation."
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate and build site
+        run: |
+          set -euo pipefail
+          npm run check
+          npm test
+          npm run clean
+          npm run build
+
+          test -s public/index.html
+          test -s public/search.json
+          test -s public/atom.xml
+          test -s public/sitemap.xml
+
+      - name: Write deployment status marker
+        id: marker
+        env:
+          SOURCE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          source_sha=$(git rev-parse HEAD)
+          node tools/write-deploy-status.js --source-commit "$source_sha"
+          report_date=$(jq -r .date public/daily-report-status.json)
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "report_date=$report_date" >> "$GITHUB_OUTPUT"
+
+          if [ "$SOURCE_REF" = "main" ] || [ "$SOURCE_REF" = "refs/heads/main" ]; then
+            remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
+            if [ "$remote_head" != "$source_sha" ]; then
+              echo "Source main changed during build; refusing to publish stale output."
+              exit 1
+            fi
+          fi
+
+      - name: Deploy generated site to Pages repository
+        id: pages
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
+          SOURCE_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_TOKEN:?DEPLOY_TOKEN secret is required}"
+          pages_dir=$(mktemp -d)
+          trap 'rm -rf "$pages_dir"' EXIT
+          git clone --depth 1 "https://x-access-token:${DEPLOY_TOKEN}@github.com/theman6660/theman6660.github.io.git" "$pages_dir"
+          rsync -a --delete --exclude .git public/ "$pages_dir"/
+
+          cd "$pages_dir"
+          git config user.name "theman6660"
+          git config user.email "theman6660@users.noreply.github.com"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No generated output changes; skip Pages commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            stamp=$(date -u +%Y-%m-%d-%H%M%S)
+            git commit -m "deploy ${SOURCE_REF} ${stamp}"
+            git push origin main
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify live deployment marker and report pages
+        env:
+          SOURCE_SHA: ${{ steps.marker.outputs.source_sha }}
+          REPORT_DATE: ${{ steps.marker.outputs.report_date }}
+        run: |
+          set -euo pipefail
+          year=${REPORT_DATE:0:4}
+          month=${REPORT_DATE:5:2}
+          day=${REPORT_DATE:8:2}
+          for attempt in $(seq 1 18); do
+            marker=$(curl -fsSL --max-time 15 "https://hanxiaofan.site/daily-report-status.json?run=${GITHUB_RUN_ID}-${attempt}" || true)
+            if jq -e --arg date "$REPORT_DATE" --arg sha "$SOURCE_SHA" '.date == $date and .sourceCommit == $sha' <<<"$marker" >/dev/null 2>&1 \
+              && curl -fsSL --max-time 15 -o /dev/null "https://hanxiaofan.site/${year}/${month}/${day}/ai-daily-${REPORT_DATE}/" \
+              && curl -fsSL --max-time 15 -o /dev/null "https://hanxiaofan.site/${year}/${month}/${day}/society-daily-${REPORT_DATE}/"; then
+              echo "Live deployment verified: $REPORT_DATE @ $SOURCE_SHA"
+              exit 0
+            fi
+            echo "Live output not current yet (attempt $attempt/18); retrying..."
+            sleep 10
+          done
+          echo "Pages push completed, but the live marker did not converge in time."
+          exit 1
+
+      - name: Tag successful main deployment
+        if: inputs.ref == 'main' || inputs.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          stamp=$(date -u +%Y-%m-%d-%H%M%S)
+          tag="deploy-${stamp}"
+          git tag "$tag"
+          git push origin "$tag"
+
+      - name: Summarize
+        env:
+          SOURCE_REF: ${{ inputs.ref }}
+          SOURCE_SHA: ${{ steps.marker.outputs.source_sha }}
+          REPORT_DATE: ${{ steps.marker.outputs.report_date }}
+          DEPLOY_REASON: ${{ inputs.reason }}
+        run: |
+          {
+            echo "### Site deployment verified"
+            echo ""
+            echo "- Source ref: \`${SOURCE_REF}\`"
+            echo "- Source commit: \`${SOURCE_SHA}\`"
+            echo "- Latest complete daily report: \`${REPORT_DATE}\`"
+            echo "- Reason: ${DEPLOY_REASON}"
+          } >> "$GITHUB_STEP_SUMMARY"

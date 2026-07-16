@@ -6,6 +6,10 @@ node_modules/
 public/
 .deploy*/
 .local-artifacts/
+.env*
+!.env.example
+data/snippets/*.json
+!data/snippets/.gitkeep
 workers/**/.wrangler/
 hexo-scripts/
 # 临时文件 — 不要提交草稿和测试图片

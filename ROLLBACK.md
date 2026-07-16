@@ -102,17 +102,19 @@ git branch -D rescue-before-rollback
    overwrite-pages
    ```
 
-这个 workflow 只做三件事：
+这个 workflow 会：
 
-1. 检出指定源码版本
-2. 运行 `npm ci`、`hexo clean`、`hexo generate`
-3. 通过最新性/确认门禁后，把 `public/` 强推到 `theman6660.github.io:main`
+1. 检出指定源码版本并验证 `main` 新鲜度（非 `main` 必须显式确认）
+2. 运行源码安全检查、单元测试和完整 Hexo 构建
+3. 生成 `daily-report-status.json` 部署标记
+4. 用最小作用域的 Pages token 同步 `public/` 到 `theman6660.github.io:main`
+5. 轮询线上标记与两篇日报 URL，验证后才把 workflow 标为成功
 
 它不会生成日报，也不会改 `beifen` 源码。
 
-## 5. 本地手动重新部署当前源码
+## 5. 从本地请求重新部署当前源码
 
-不建议在本地直接 `npm run deploy` 推 Pages。推荐路径是：本地只负责修改源码、构建验证、提交推送；线上发布交给 GitHub Actions。
+`npm run deploy` 不再直接推 Pages。它会检查当前分支、工作树、`HEAD == origin/main`，然后触发 `Manual Site Redeploy`：
 
 ```powershell
 cd D:\code\personal-website
@@ -121,9 +123,10 @@ git status --short
 git add <改动文件>
 git commit -m "docs: ..."
 git push origin main
+npm run deploy
 ```
 
-推送后，到 GitHub Actions 运行 `Manual Site Redeploy`，`ref` 填 `main`。这样 Pages 始终由 CI 从 `beifen` 源码重建，不让本地直接覆盖线上生成物。
+如果工作树不干净、本地落后或提交尚未推送，命令会拒绝触发。这样 Pages 始终由 CI 从 `beifen` 源码重建，不让本地直接覆盖线上生成物。
 
 ## 6. 出事时不要做的事
 
@@ -131,7 +134,7 @@ git push origin main
 - 不要把 `theman6660.github.io` 当作源码备份。
 - 不要在有未提交文章时随便切标签或回退。
 - 不要在日报脚本还失败时反复部署 Pages，先修源码。
-- 不要把本地 `npm run deploy` 当作常规恢复路径；恢复应从源码提交和 Actions 重建开始。
+- 不要绕过 `npm run deploy` 去调用 `hexo deploy`；项目已移除直推 Pages 的 Hexo 配置。
 
 ## 7. 日常预防习惯
 

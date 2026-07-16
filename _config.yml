@@ -5,11 +5,11 @@
 # Site
 title: 韩小凡的小站
 subtitle: ''
-description: '个人博客 - 技术、思考与日常'
+description: '韩小凡的个人网站：AI、技术实验、阅读写作与对时代生活的观察。'
 keywords: 技术,编程,AI,个人博客
 author: 韩小凡
 language: zh-CN
-timezone: ''
+timezone: Asia/Shanghai
 
 # URL
 ## Set your site url here. For example, if you use GitHub Page, set url as 'https://username.github.io/project'
@@ -42,7 +42,7 @@ filename_case: 0
 render_drafts: false
 post_asset_folder: false
 relative_link: false
-future: true
+future: false
 syntax_highlighter: highlight.js
 highlight:
   line_number: true
@@ -80,7 +80,7 @@ meta_generator: true
 date_format: YYYY-MM-DD
 time_format: HH:mm:ss
 ## updated_option supports 'mtime', 'date', 'empty'
-updated_option: 'mtime'
+updated_option: 'empty'
 
 # Pagination
 ## Set per_page to 0 to disable pagination
@@ -99,9 +99,28 @@ ignore:
 ## Themes: https://hexo.io/themes/
 theme: redefine
 
-# Deployment
-## Docs: https://hexo.io/docs/one-command-deployment
-deploy:
-  type: git
-  repo: https://github.com/theman6660/theman6660.github.io.git
-  branch: main
+# Markdown rendering safety. Daily reports contain third-party RSS and LLM text,
+# so URLs and generated HTML must be sanitized before they reach the browser.
+marked:
+  sanitizeUrl: true
+  dompurify: true
+
+# Keep local search lightweight: titles, tags and categories remain searchable,
+# while full article bodies are loaded only after a user opens an article.
+search:
+  path: search.json
+  field: post
+  content: false
+  format: striptags
+
+feed:
+  type: atom
+  path: atom.xml
+  limit: 30
+  content: false
+
+sitemap:
+  path: sitemap.xml
+
+# Publishing is intentionally not configured here. Use `npm run deploy`, which
+# verifies the source checkout and dispatches the audited GitHub Actions deploy.

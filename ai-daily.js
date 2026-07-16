@@ -4,7 +4,6 @@ const { HttpsProxyAgent } = require('https-proxy-agent');
 const RSSParser = require('rss-parser');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 const {
   insertChronicleEntry,
   writeChronicleEntryArtifact,
@@ -15,6 +14,12 @@ const {
   beijingDateISO,
   beijingDateCN,
 } = require('./lib/date-utils');
+const {
+  buildSourceList: buildSafeSourceList,
+  hasUnsafeMarkdownSeparator,
+  normalizeReport: normalizeSafeReport,
+  sanitizeNewsItem,
+} = require('./lib/markdown-safety');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -74,11 +79,11 @@ function parseRunMode() {
     console.error('错误: --deploy 和 --no-deploy 不能同时使用');
     process.exit(1);
   }
-  return { deploy, force };
-}
-
-function toGitPath(filePath) {
-  return path.relative(HEXO_DIR, filePath).replace(/\\/g, '/');
+  if (deploy) {
+    console.error('错误: --deploy 已停用。请先提交并推送源文件，再运行 npm run deploy 触发安全部署。');
+    process.exit(1);
+  }
+  return { force };
 }
 
 function getDailyPostPath(dateISO) {
@@ -89,19 +94,6 @@ function getDailyPostPath(dateISO) {
     fileName,
     filePath: path.join(postsDir, fileName),
   };
-}
-
-function assertNoUnexpectedPostChanges(allowedRelPaths) {
-  const allowed = new Set(allowedRelPaths.map(p => p.replace(/\\/g, '/')));
-  const raw = execSync('git status --porcelain -z -- source/_posts', { cwd: HEXO_DIR });
-  const entries = raw.toString('utf8').split('\0').filter(Boolean)
-    .map(entry => ({ status: entry.slice(0, 2), file: entry.slice(3).replace(/\\/g, '/') }))
-    .filter(entry => entry.file && !allowed.has(entry.file));
-
-  if (entries.length > 0) {
-    const details = entries.map(entry => `${entry.status} ${entry.file}`).join('\n');
-    throw new Error(`拒绝本地部署：source/_posts 中存在非本次生成的本地变更。\n${details}`);
-  }
 }
 
 // ============ 北京时间工具函数 ============
@@ -411,7 +403,7 @@ async function fetchNews() {
         : [];
 
       const recentItems = relevantItems
-        .map(item => ({
+        .map(item => sanitizeNewsItem({
           title: item.title || '(无标题)',
           link: item.link || '',
           date: item.pubDate || item.isoDate,
@@ -598,19 +590,6 @@ function localQualityCheck(report) {
   return { pass: true, reason: '本地硬检查通过' };
 }
 
-function hasUnsafeMarkdownSeparator(report) {
-  return report
-    .split(/\r?\n/)
-    .some(line => /^\s{0,3}[-*_]{3,}\s*$/.test(line));
-}
-
-function stripUnsafeMarkdownSeparators(report) {
-  return report
-    .split(/\r?\n/)
-    .filter(line => !/^\s{0,3}[-*_]{3,}\s*$/.test(line))
-    .join('\n');
-}
-
 const SOURCE_COVERAGE_THRESHOLDS = {
   idealNewsItems: 12,
   idealSources: 5,
@@ -728,41 +707,29 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
     }
 
     console.log(`[质检] 未通过: ${reason}`);
-    const score = scoreReport(report);
-    if (score > bestScore) {
-      bestScore = score;
-      bestReport = report;
+    const hardCheck = localQualityCheck(report);
+    if (hardCheck.pass) {
+      const score = scoreReport(report);
+      if (score > bestScore) {
+        bestScore = score;
+        bestReport = report;
+      }
     }
   }
 
-  console.log('[质检] 所有重试未通过，返回评分最高的结果');
-  return bestReport || '';
+  if (bestReport) {
+    console.warn('[质检] 主观模型质检未通过，但本地硬检查通过；采用评分最高的安全结果');
+    return bestReport;
+  }
+  throw new Error('所有生成结果均未通过本地硬检查，拒绝发布');
 }
 
 function normalizeReport(report, title) {
-  return stripUnsafeMarkdownSeparators(report
-    .replace(/^```(?:markdown)?\s*/i, '')
-    .replace(/```\s*$/i, '')
-    .split(/\r?\n/)
-    .filter((line, index) => !(index === 0 && line.trim() === title))
-    .join('\n')
-  ).trim();
+  return normalizeSafeReport(report, title);
 }
 
 function buildSourceList(newsItems, maxSources = 30) {
-  const seen = new Set();
-  const sources = [];
-  for (const item of newsItems) {
-    if (!item.link) continue;
-    const key = `${item.title}|${item.link}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    sources.push(`- [${item.source}] [${item.title}](${item.link})`);
-    if (sources.length >= maxSources) break;
-  }
-
-  if (sources.length === 0) return '';
-  return `\n\n## 参考来源\n\n${sources.join('\n')}`;
+  return buildSafeSourceList(newsItems, maxSources);
 }
 
 // ============ 编年史更新 ============
@@ -880,10 +847,10 @@ ${normalizedReport}${sourceList}
 
 // ============ 主流程 ============
 async function main() {
-  const { deploy, force } = parseRunMode();
+  const { force } = parseRunMode();
   console.log('========================================');
   console.log('  AI行业日报生成器');
-  if (!deploy) console.log('  (仅生成，不部署；如需本地部署请显式传 --deploy)');
+  console.log('  (仅生成；提交并推送后使用 npm run deploy 安全部署)');
   console.log('========================================\n');
 
   const dateISO = beijingDateISO();
@@ -930,33 +897,11 @@ async function main() {
 
   // 3. 发布到Hexo
   console.log('\n[步骤3] 写入文章...\n');
-  const postFile = publishToHexo(report, dateStrCN, dateISO, promptNewsItems);
+  publishToHexo(report, dateStrCN, dateISO, promptNewsItems);
 
   // 4. 更新编年史
   console.log('\n[步骤4] 更新编年史...\n');
   await updateChronicle(newsItems);
-
-  // 5. 部署
-  if (deploy) {
-    assertNoUnexpectedPostChanges([toGitPath(postFile), toGitPath(CHRONICLE_FILE)]);
-    console.log('\n[步骤5] 部署网站...\n');
-    const env = { ...process.env };
-    if (PROXY_URL) {
-      env.HTTP_PROXY = PROXY_URL;
-      env.HTTPS_PROXY = PROXY_URL;
-    }
-    try {
-      execSync('npx hexo clean && npx hexo generate && npx hexo deploy', {
-        cwd: HEXO_DIR,
-        env,
-        stdio: 'inherit',
-      });
-      console.log('[部署] 完成！');
-    } catch (err) {
-      console.error('[部署] 失败:', err.message || String(err));
-      process.exit(1);
-    }
-  }
 
   console.log('\n========================================');
   console.log('  日报生成完成！');

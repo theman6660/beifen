@@ -1,7 +1,9 @@
 const DEFAULT_REPO = 'theman6660/beifen';
 const DEFAULT_BRANCH = 'main';
-const DEFAULT_WORKFLOW = 'daily-report.yml';
+const DEFAULT_SOURCE_WORKFLOW = 'daily-report.yml';
+const DEFAULT_REDEPLOY_WORKFLOW = 'manual-site-redeploy.yml';
 const DEFAULT_API_BASE = 'https://api.github.com';
+const DEFAULT_LIVE_SITE = 'https://hanxiaofan.site';
 
 function isTruthy(value) {
   return ['1', 'true', 'yes', 'y', 'on'].includes(String(value || '').toLowerCase());
@@ -14,23 +16,19 @@ function getEnv(env, name, fallback = '') {
 
 function getBeijingDateISO(now = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
   }).formatToParts(now);
-
-  const year = parts.find((part) => part.type === 'year').value;
-  const month = parts.find((part) => part.type === 'month').value;
-  const day = parts.find((part) => part.type === 'day').value;
-  return `${year}-${month}-${day}`;
+  const value = (type) => parts.find((part) => part.type === type).value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
 }
 
 function getConfig(env, overrides = {}) {
   return {
     repo: overrides.repo || getEnv(env, 'DAILY_REPORT_REPO', DEFAULT_REPO),
     branch: overrides.branch || getEnv(env, 'DAILY_REPORT_BRANCH', DEFAULT_BRANCH),
-    workflow: overrides.workflow || getEnv(env, 'DAILY_REPORT_WORKFLOW', DEFAULT_WORKFLOW),
+    sourceWorkflow: overrides.sourceWorkflow || getEnv(env, 'DAILY_REPORT_WORKFLOW', DEFAULT_SOURCE_WORKFLOW),
+    redeployWorkflow: overrides.redeployWorkflow || getEnv(env, 'DAILY_REPORT_REDEPLOY_WORKFLOW', DEFAULT_REDEPLOY_WORKFLOW),
+    liveSiteUrl: getEnv(env, 'LIVE_SITE_URL', DEFAULT_LIVE_SITE).replace(/\/$/, ''),
     date: overrides.date || getEnv(env, 'BJ_DATE', getBeijingDateISO()),
     apiBase: getEnv(env, 'GITHUB_API_URL', DEFAULT_API_BASE).replace(/\/$/, ''),
     token: getEnv(env, 'GITHUB_TOKEN', getEnv(env, 'GH_TOKEN')),
@@ -38,126 +36,155 @@ function getConfig(env, overrides = {}) {
   };
 }
 
-function encodePath(path) {
-  return path.split('/').map(encodeURIComponent).join('/');
+function encodePath(value) {
+  return value.split('/').map(encodeURIComponent).join('/');
 }
 
-async function githubRequest(config, path, options = {}) {
+async function githubRequest(config, requestPath, options = {}) {
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'personal-website-daily-report-sentinel',
     'X-GitHub-Api-Version': '2022-11-28',
     ...(options.headers || {}),
   };
-
-  if (config.token) {
-    headers.Authorization = `Bearer ${config.token}`;
-  }
-
-  const response = await fetch(`${config.apiBase}${path}`, {
-    ...options,
-    headers,
-  });
+  if (config.token) headers.Authorization = `Bearer ${config.token}`;
+  const response = await fetch(`${config.apiBase}${requestPath}`, { ...options, headers });
   const text = await response.text();
-
-  if (response.status === 404) {
-    return { ok: false, status: 404, data: null, text };
-  }
-
+  if (response.status === 404) return { ok: false, status: 404, data: null, text };
   if (!response.ok) {
     const body = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-    throw new Error(`GitHub API ${options.method || 'GET'} ${path} failed: ${response.status} ${body}`);
+    throw new Error(`GitHub API ${options.method || 'GET'} ${requestPath} failed: ${response.status} ${body}`);
   }
-
-  return {
-    ok: true,
-    status: response.status,
-    data: text ? JSON.parse(text) : null,
-    text,
-  };
+  return { ok: true, status: response.status, data: text ? JSON.parse(text) : null, text };
 }
 
-async function fileExists(config, path) {
-  const encoded = encodePath(path);
+async function fileExists(config, filePath) {
   const result = await githubRequest(
     config,
-    `/repos/${config.repo}/contents/${encoded}?ref=${encodeURIComponent(config.branch)}`,
+    `/repos/${config.repo}/contents/${encodePath(filePath)}?ref=${encodeURIComponent(config.branch)}`,
   );
   return result.ok;
 }
 
-async function countRuns(config, status) {
-  const query = new URLSearchParams({
-    branch: config.branch,
-    status,
-    per_page: '20',
-  });
+async function getSourceCommit(config) {
+  const result = await githubRequest(config, `/repos/${config.repo}/commits/${encodeURIComponent(config.branch)}`);
+  return result.data?.sha || '';
+}
+
+async function countRuns(config, workflow, status) {
+  const query = new URLSearchParams({ branch: config.branch, status, per_page: '20' });
   const result = await githubRequest(
     config,
-    `/repos/${config.repo}/actions/workflows/${encodeURIComponent(config.workflow)}/runs?${query}`,
+    `/repos/${config.repo}/actions/workflows/${encodeURIComponent(workflow)}/runs?${query}`,
   );
   return Array.isArray(result.data?.workflow_runs) ? result.data.workflow_runs.length : 0;
 }
 
-async function dispatchWorkflow(config) {
-  await githubRequest(config, `/repos/${config.repo}/actions/workflows/${encodeURIComponent(config.workflow)}/dispatches`, {
+async function dispatchWorkflow(config, workflow, inputs = undefined) {
+  await githubRequest(config, `/repos/${config.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ref: config.branch }),
+    body: JSON.stringify({ ref: config.branch, ...(inputs ? { inputs } : {}) }),
   });
+}
+
+async function readLiveMarker(config) {
+  try {
+    const response = await fetch(`${config.liveSiteUrl}/daily-report-status.json?sentinel=${Date.now()}`, {
+      headers: { Accept: 'application/json' },
+      redirect: 'follow',
+    });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function livePageExists(url) {
+  try {
+    let response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
+    if (response.status === 405) response = await fetch(url, { method: 'GET', redirect: 'follow' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function getLiveState(config, sourceCommit) {
+  const [year, month, day] = config.date.split('-');
+  const aiUrl = `${config.liveSiteUrl}/${year}/${month}/${day}/ai-daily-${config.date}/`;
+  const societyUrl = `${config.liveSiteUrl}/${year}/${month}/${day}/society-daily-${config.date}/`;
+  const [marker, ai, society] = await Promise.all([
+    readLiveMarker(config), livePageExists(aiUrl), livePageExists(societyUrl),
+  ]);
+  const markerCurrent = marker?.date === config.date && marker?.sourceCommit === sourceCommit;
+  return { marker, markerCurrent, ai, society, current: markerCurrent && ai && society };
 }
 
 async function runSentinel(env, overrides = {}) {
   const config = getConfig(env, overrides);
   const aiPath = `source/_posts/ai-daily-${config.date}.md`;
   const societyPath = `source/_posts/society-daily-${config.date}.md`;
-
-  const [hasAi, hasSociety] = await Promise.all([
-    fileExists(config, aiPath),
-    fileExists(config, societyPath),
-  ]);
-
+  const [hasAi, hasSociety] = await Promise.all([fileExists(config, aiPath), fileExists(config, societyPath)]);
   const result = {
     repo: config.repo,
     branch: config.branch,
-    workflow: config.workflow,
     date: config.date,
     dryRun: config.dryRun,
-    posts: {
-      ai: { path: aiPath, exists: hasAi },
-      society: { path: societyPath, exists: hasSociety },
-    },
+    posts: { ai: { path: aiPath, exists: hasAi }, society: { path: societyPath, exists: hasSociety } },
+    action: '',
+    workflow: '',
     dispatched: false,
     skippedReason: '',
   };
 
-  if (hasAi && hasSociety) {
-    result.skippedReason = 'posts_already_exist';
-    return result;
+  let workflow;
+  let inputs;
+  if (!hasAi || !hasSociety) {
+    result.action = 'generate';
+    workflow = config.sourceWorkflow;
+  } else {
+    const sourceCommit = await getSourceCommit(config);
+    const deployment = await getLiveState(config, sourceCommit);
+    result.sourceCommit = sourceCommit;
+    result.deployment = deployment;
+    if (deployment.current) {
+      result.skippedReason = 'source_and_live_deployment_current';
+      return result;
+    }
+    result.action = 'redeploy';
+    workflow = config.redeployWorkflow;
+    inputs = { ref: config.branch, reason: `Cloudflare sentinel recovery for ${config.date}` };
   }
+  result.workflow = workflow;
 
   if (config.dryRun) {
     result.skippedReason = 'dry_run';
     return result;
   }
+  if (!config.token) throw new Error('GITHUB_TOKEN or GH_TOKEN is required to inspect active runs and dispatch recovery.');
 
-  if (!config.token) {
-    throw new Error('GITHUB_TOKEN or GH_TOKEN is required to inspect active runs and dispatch the workflow.');
+  const countWorkflow = async (name) => {
+    const [queued, inProgress] = await Promise.all([
+      countRuns(config, name, 'queued'), countRuns(config, name, 'in_progress'),
+    ]);
+    return { queued, inProgress, total: queued + inProgress };
+  };
+  const active = await countWorkflow(workflow);
+  if (result.action === 'redeploy') {
+    const generation = await countWorkflow(config.sourceWorkflow);
+    active.queued += generation.queued;
+    active.inProgress += generation.inProgress;
+    active.total += generation.total;
   }
-
-  const [queued, inProgress] = await Promise.all([
-    countRuns(config, 'queued'),
-    countRuns(config, 'in_progress'),
-  ]);
-  const activeRuns = queued + inProgress;
-  result.activeRuns = { queued, inProgress, total: activeRuns };
-
-  if (activeRuns > 0) {
-    result.skippedReason = 'workflow_already_active';
+  result.activeRuns = active;
+  if (active.total > 0) {
+    result.skippedReason = 'recovery_already_active';
     return result;
   }
 
-  await dispatchWorkflow(config);
+  await dispatchWorkflow(config, workflow, inputs);
   result.dispatched = true;
   return result;
 }
@@ -171,8 +198,7 @@ function jsonResponse(body, status = 200) {
 
 function isAuthorized(request, env) {
   const token = getEnv(env, 'MANUAL_TRIGGER_TOKEN');
-  if (!token) return false;
-  return request.headers.get('authorization') === `Bearer ${token}`;
+  return Boolean(token) && request.headers.get('authorization') === `Bearer ${token}`;
 }
 
 export default {
@@ -182,27 +208,13 @@ export default {
       console.log(JSON.stringify({ event: 'daily-report-sentinel', ...result }));
     })());
   },
-
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    if (url.pathname === '/health') {
-      return jsonResponse({ ok: true, service: 'daily-report-sentinel' });
-    }
-
-    if (url.pathname !== '/run') {
-      return jsonResponse({ ok: false, error: 'not_found' }, 404);
-    }
-
+    if (url.pathname === '/health') return jsonResponse({ ok: true, service: 'daily-report-sentinel' });
+    if (url.pathname !== '/run') return jsonResponse({ ok: false, error: 'not_found' }, 404);
     const dryRun = isTruthy(url.searchParams.get('dryRun'));
-    if (!dryRun && !isAuthorized(request, env)) {
-      return jsonResponse({ ok: false, error: 'unauthorized' }, 401);
-    }
-
-    const result = await runSentinel(env, {
-      date: url.searchParams.get('date') || undefined,
-      dryRun,
-    });
+    if (!dryRun && !isAuthorized(request, env)) return jsonResponse({ ok: false, error: 'unauthorized' }, 401);
+    const result = await runSentinel(env, { date: url.searchParams.get('date') || undefined, dryRun });
     return jsonResponse({ ok: true, result });
   },
 };

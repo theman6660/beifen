@@ -1,0 +1,52 @@
+name: Site CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Check PowerShell syntax
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in @('tools/daily-report-sentinel.ps1', 'tools/request-site-redeploy.ps1')) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$file`: $($_.Message)" }
+              $failed = $true
+            }
+          }
+          if ($failed) { exit 1 }
+      - run: npm run check
+      - run: npm test
+      - run: npm run clean
+      - run: npm run build
+      - name: Validate generated artifacts
+        run: |
+          test -s public/index.html
+          test -s public/search.json
+          test -s public/atom.xml
+          test -s public/sitemap.xml
+          test "$(wc -c < public/search.json)" -lt 500000
+      - run: npm run sentinel:cloudflare:dry-run
