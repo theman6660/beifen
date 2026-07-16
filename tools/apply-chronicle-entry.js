@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const { insertChronicleEntry } = require('../chronicle-utils');
+const { splitChronicleEntries, validateChronicleEntry } = require('../lib/chronicle-quality');
 const {
   getBeijingDateParts,
   beijingDateISO,
@@ -49,21 +50,31 @@ function main() {
     ? fs.readFileSync(chronicleFile, 'utf-8')
     : '';
 
-  const result = insertChronicleEntry(existingChronicle, entryText, {
-    year,
-    month,
-    dateISO,
-    dateStrCN,
-  });
-
-  if (!result.updated) {
-    console.log(`[编年史] 跳过新增条目: ${result.reason}`);
-    return;
+  let content = existingChronicle;
+  let applied = 0;
+  for (const entry of splitChronicleEntries(entryText)) {
+    const quality = validateChronicleEntry(entry);
+    if (!quality.pass) throw new Error(`拒绝不完整编年史条目: ${quality.reason}`);
+    const result = insertChronicleEntry(content, entry, {
+      year,
+      month,
+      dateISO,
+      dateStrCN,
+    });
+    if (!result.updated) {
+      console.log(`[编年史] 跳过新增条目: ${result.reason}`);
+      continue;
+    }
+    content = result.content;
+    applied += 1;
+    console.log(`[编年史] 已应用新增条目: ${result.entryText.split('\n')[0]}`);
   }
 
+  if (applied === 0) return;
+
   fs.mkdirSync(path.dirname(chronicleFile), { recursive: true });
-  fs.writeFileSync(chronicleFile, result.content, 'utf-8');
-  console.log(`[编年史] 已应用新增条目: ${result.entryText.split('\n')[0]}`);
+  fs.writeFileSync(chronicleFile, content, 'utf-8');
+  console.log(`[编年史] 共应用 ${applied} 条`);
 }
 
 try {

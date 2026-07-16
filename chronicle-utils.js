@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { extractChronicleEntryDate } = require('./lib/chronicle-quality');
 
 const DEFAULT_CHRONICLE_PERMALINK = '/ai-chronicle/';
 
@@ -106,10 +107,20 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
     return { updated: false, reason: 'empty-entry', content: existingChronicle || '', entryText };
   }
 
-  let content = existingChronicle || buildInitialChronicle({ year, month, dateISO, permalink });
+  const parsedEntryDate = extractChronicleEntryDate(entryText);
+  const targetYear = parsedEntryDate?.year || year;
+  const targetMonth = parsedEntryDate?.month || month;
+  const targetDateStrCN = parsedEntryDate?.dateStrCN || dateStrCN;
+
+  let content = existingChronicle || buildInitialChronicle({
+    year: targetYear,
+    month: targetMonth,
+    dateISO,
+    permalink,
+  });
   content = ensureChroniclePermalink(content, permalink);
 
-  const todayMarker = dateStrCN ? `**${dateStrCN}**` : '';
+  const todayMarker = targetDateStrCN ? `**${targetDateStrCN}**` : '';
 
   // 同日已有条目 → 追加而不是跳过
   if (todayMarker && content.includes(todayMarker)) {
@@ -127,8 +138,8 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
     return { updated: false, reason: 'date-exists-merge-failed', content, entryText };
   }
 
-  const monthHeader = `### ${month}月`;
-  const yearHeader = `## ${year}年`;
+  const monthHeader = `### ${targetMonth}月`;
+  const yearHeader = `## ${targetYear}年`;
   const yearIndex = content.indexOf(yearHeader);
   const yearSectionEnd = findYearSectionEnd(content, yearHeader, yearIndex);
 
@@ -149,7 +160,7 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
 
     while ((match = monthRegex.exec(yearSection)) !== null) {
       const existingMonth = parseInt(match[1], 10);
-      if (existingMonth < month) {
+      if (existingMonth < targetMonth) {
         const absPos = yearIndex + match.index;
         const afterExistingMonth = absPos + match[0].length;
         const nextBoundary = content.slice(afterExistingMonth).search(/\n(?:## \d{4}年|### \d{1,2}月)/);
@@ -162,9 +173,9 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
     const firstYearMatch = content.match(/\n## \d{4}年/);
     if (firstYearMatch) {
       const insertAt = content.indexOf(firstYearMatch[0]);
-      updatedChronicle = content.slice(0, insertAt) + '\n\n## ' + year + '年\n\n' + monthHeader + '\n' + entryText + '\n' + content.slice(insertAt);
+      updatedChronicle = content.slice(0, insertAt) + '\n\n## ' + targetYear + '年\n\n' + monthHeader + '\n' + entryText + '\n' + content.slice(insertAt);
     } else {
-      updatedChronicle = content + '\n## ' + year + '年\n\n' + monthHeader + '\n' + entryText + '\n';
+      updatedChronicle = content + '\n## ' + targetYear + '年\n\n' + monthHeader + '\n' + entryText + '\n';
     }
   }
 

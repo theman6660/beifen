@@ -20,6 +20,14 @@ const {
   normalizeReport: normalizeSafeReport,
   sanitizeNewsItem,
 } = require('./lib/markdown-safety');
+const {
+  buildChronicleEntry,
+  extractRecentChronicleContext,
+  parseDailySourceItems,
+  parseJsonObject,
+  validateChronicleCandidate,
+  validateChronicleEntry,
+} = require('./lib/chronicle-quality');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -38,6 +46,8 @@ const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
 const PROMPT_NEWS_LIMIT = 40;
 const PROMPT_SNIPPET_CHARS = 500;
+const CHRONICLE_NEWS_LIMIT = 50;
+const CHRONICLE_LOOKBACK_DAYS = 7;
 
 let client;
 
@@ -111,7 +121,26 @@ const RSS_SOURCES = [
   { url: 'https://huggingface.co/blog/feed.xml', name: 'Hugging Face Blog' },
   { url: 'https://stratechery.com/feed/', name: 'Stratechery', requireAIKeyword: true },
   { url: 'https://openai.com/news/rss.xml', name: 'OpenAI News' },
+  { url: 'https://blogs.nvidia.com/feed/', name: 'NVIDIA Blog', requireAIKeyword: true },
   { url: 'https://www.marktechpost.com/feed/', name: 'MarkTechPost' },
+];
+
+// Anthropic 与 Google DeepMind 当前没有稳定可用的新闻 RSS，改从官方
+// sitemap 读取近期发布页。只接受 news/blog 路径，避免把产品页更新时间
+// 误当成新闻发布。
+const SITEMAP_SOURCES = [
+  {
+    url: 'https://www.anthropic.com/sitemap.xml',
+    name: 'Anthropic Official',
+    pathPattern: /^https:\/\/www\.anthropic\.com\/news\//,
+    maxItems: 10,
+  },
+  {
+    url: 'https://deepmind.google/sitemap.xml',
+    name: 'Google DeepMind',
+    pathPattern: /^https:\/\/deepmind\.google\/blog\//,
+    maxItems: 8,
+  },
 ];
 
 const RSS_SOURCES_CN = [
@@ -123,7 +152,10 @@ const RSS_SOURCES_CN = [
 const CN_SOURCES = new Set(RSS_SOURCES_CN.map(source => source.name));
 
 const SOURCE_IMPORTANCE_WEIGHTS = new Map([
-  ['OpenAI News', 9],
+  ['Anthropic Official', 12],
+  ['OpenAI News', 12],
+  ['Google DeepMind', 11],
+  ['NVIDIA Blog', 9],
   ['MIT Tech Review', 7],
   ['Stratechery', 7],
   ['TechCrunch', 6],
@@ -209,8 +241,8 @@ const AI_KEYWORDS = [
 ].map(keyword => keyword.toLowerCase());
 
 const IMPORTANCE_SIGNALS = [
-  { token: 'openai', label: 'OpenAI', weight: 8 },
-  { token: 'anthropic', label: 'Anthropic', weight: 7 },
+  { token: 'openai', label: 'OpenAI', weight: 10 },
+  { token: 'anthropic', label: 'Anthropic', weight: 10 },
   { token: 'google', label: 'Google', weight: 6 },
   { token: 'deepmind', label: 'DeepMind', weight: 6 },
   { token: 'microsoft', label: 'Microsoft', weight: 6 },
@@ -372,6 +404,76 @@ function selectNewsForPrompt(newsItems, maxNews = PROMPT_NEWS_LIMIT) {
   return selected.slice(0, maxNews);
 }
 
+function decodeXml(value) {
+  return String(value || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+function titleFromUrl(url) {
+  try {
+    const slug = new URL(url).pathname.split('/').filter(Boolean).pop() || 'official update';
+    return slug.split('-').filter(Boolean).map(word => {
+      if (/^(ai|api|agi|rl)$/i.test(word)) return word.toUpperCase();
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(' ');
+  } catch {
+    return 'Official update';
+  }
+}
+
+async function fetchText(url, timeoutMs = RSS_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: { 'User-Agent': 'hanxiaofan-ai-chronicle/1.0' },
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.text();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchSitemapNews(source, yesterday) {
+  console.log(`[抓取] ${source.name} sitemap...`);
+  const xml = await fetchText(source.url);
+  const matches = [...xml.matchAll(/<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>/g)];
+  const nowPlusOneDay = Date.now() + 864e5;
+  const items = matches
+    .map(match => ({ link: decodeXml(match[1]), lastmod: decodeXml(match[2]) }))
+    .filter(item => source.pathPattern.test(item.link))
+    .map(item => ({ ...item, timestamp: new Date(item.lastmod).getTime() }))
+    .filter(item => Number.isFinite(item.timestamp) && item.timestamp >= yesterday.getTime() && item.timestamp <= nowPlusOneDay)
+    .sort((a, b) => b.timestamp - a.timestamp)
+    .slice(0, source.maxItems)
+    .map(item => sanitizeNewsItem({
+      title: titleFromUrl(item.link),
+      link: item.link,
+      date: item.lastmod,
+      source: source.name,
+      snippet: `${source.name} 官方发布页`,
+      _timestamp: item.timestamp,
+    }));
+  console.log(`  -> ${source.name}：获取 ${items.length} 条官方更新`);
+  return items;
+}
+
+function dedupeNewsItems(items) {
+  const seen = new Set();
+  return items.filter(item => {
+    const key = item.link || `${item.source}|${item.title}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 // ============ RSS抓取 ============
 async function fetchNews() {
   const bj = beijingNow();
@@ -425,6 +527,10 @@ async function fetchNews() {
     })
   );
 
+  const sitemapResults = await Promise.allSettled(
+    SITEMAP_SOURCES.map(source => fetchSitemapNews(source, yesterday))
+  );
+
   const allItems = [];
   for (let i = 0; i < results.length; i += 1) {
     const r = results[i];
@@ -435,7 +541,17 @@ async function fetchNews() {
     }
   }
 
-  allItems.sort((a, b) => {
+  for (let i = 0; i < sitemapResults.length; i += 1) {
+    const result = sitemapResults[i];
+    if (result.status === 'fulfilled') {
+      allItems.push(...result.value);
+    } else {
+      console.log(`  -> ${SITEMAP_SOURCES[i].name} 抓取失败: ${result.reason?.message || String(result.reason)}`);
+    }
+  }
+
+  const dedupedItems = dedupeNewsItems(allItems);
+  dedupedItems.sort((a, b) => {
     const ta = a._timestamp;
     const tb = b._timestamp;
     if (isNaN(ta) && isNaN(tb)) return 0;
@@ -443,7 +559,7 @@ async function fetchNews() {
     if (isNaN(tb)) return -1;
     return tb - ta;
   });
-  return rankNewsItems(allItems);
+  return rankNewsItems(dedupedItems);
 }
 
 // ============ LLM生成报告 ============
@@ -733,6 +849,68 @@ function buildSourceList(newsItems, maxSources = 30) {
 }
 
 // ============ 编年史更新 ============
+function getDateBefore(dateISO, offsetDays) {
+  const date = new Date(`${dateISO}T12:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - offsetDays);
+  return date.toISOString().slice(0, 10);
+}
+
+function loadRecentDailyEvidence(dateISO, lookbackDays = CHRONICLE_LOOKBACK_DAYS) {
+  const postsDir = path.join(HEXO_DIR, 'source', '_posts');
+  const items = [];
+  for (let offset = 1; offset <= lookbackDays; offset += 1) {
+    const reviewDate = getDateBefore(dateISO, offset);
+    const filePath = path.join(postsDir, `ai-daily-${reviewDate}.md`);
+    if (!fs.existsSync(filePath)) continue;
+    const markdown = fs.readFileSync(filePath, 'utf-8');
+    items.push(...parseDailySourceItems(markdown, reviewDate).map(sanitizeNewsItem));
+  }
+  return items;
+}
+
+function selectChronicleEvidence(newsItems, dateISO) {
+  const rollingItems = loadRecentDailyEvidence(dateISO);
+  const combined = dedupeNewsItems([...newsItems, ...rollingItems]);
+  const ranked = rankNewsItems(combined);
+  const selected = selectWithSourceCap(ranked, CHRONICLE_NEWS_LIMIT, 8);
+  console.log(`[编年史] 候选证据 ${selected.length} 条（含近 ${CHRONICLE_LOOKBACK_DAYS} 天回看 ${rollingItems.length} 条）`);
+  console.log(`[编年史] 证据来源: ${formatSourceDistribution(selected)}`);
+  return selected;
+}
+
+function formatChronicleEvidence(items) {
+  return items.map((item, index) => [
+    `${index + 1}. [${item.source}] ${item.title}`,
+    `   日期: ${item.date || '未知'}`,
+    `   链接: ${item.link || '无'}`,
+    item.snippet ? `   摘要: ${item.snippet.slice(0, 350)}` : '',
+  ].filter(Boolean).join('\n')).join('\n\n');
+}
+
+async function callChronicleJson(prompt, label, maxTokens = 2600, attempts = 2) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await getClient().chat.completions.create({
+        model: MODEL,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      const choice = response?.choices?.[0];
+      const finishReason = choice?.finish_reason || 'unknown';
+      const rawText = choice?.message?.content?.trim() || '';
+      console.log(`[编年史] ${label} 第 ${attempt} 次: finish_reason=${finishReason}, ${rawText.slice(0, 180)}`);
+      if (finishReason !== 'stop') throw new Error(`输出未完整结束: ${finishReason}`);
+      return parseJsonObject(rawText);
+    } catch (err) {
+      lastError = err;
+      console.warn(`[编年史] ${label} 第 ${attempt} 次失败: ${err.message}`);
+      if (attempt < attempts) await wait(1000 * attempt);
+    }
+  }
+  throw lastError || new Error(`${label}失败`);
+}
+
 async function updateChronicle(newsItems) {
   const { year, month } = getBeijingDateParts();
   const dateStrCN = beijingDateCN();
@@ -743,79 +921,118 @@ async function updateChronicle(newsItems) {
     existingChronicle = fs.readFileSync(CHRONICLE_FILE, 'utf-8');
   }
 
-  const newsText = newsItems.slice(0, 20).map((item, i) =>
-    `${i + 1}. [${item.source}] ${item.title}${item.snippet ? `\n   摘要: ${item.snippet.slice(0, 200)}` : ''}`
-  ).join('\n\n');
-
-  const prompt = `判断以下AI行业新闻中，是否有值得记录到编年史的重大事件。
-
-今日新闻（含来源和摘要用于交叉验证）：
-${newsText}
-
-记录标准（必须同时满足）：
-1. 技术上有质的飞跃（不是渐进改进）
-2. 对社会或行业有深远影响
-
-注意：
-- 利用摘要和来源判断事件的真实性和重要性，忽略标题党
-- 排除：常规产品更新、小版本迭代、融资传闻、未证实的推测
-- 同一事件被多个来源报道时只记录一次
-
-如果没有符合条件的事件，只输出：无更新
-
-如果有，输出格式：
-- **${dateStrCN}**：事件描述
-  - **意义**：社会/思想影响（2-3句）
-
-注意：输出中不要包含任何以 ## 或 ### 开头的行（Markdown标题格式），这会破坏文档结构。
-直接输出，不要解释。`;
-
   try {
-    console.log('[编年史] 分析今日新闻...');
-    const response = await getClient().chat.completions.create({
-      model: MODEL,
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }],
-    });
+    if (CHRONICLE_ENTRY_FILE && fs.existsSync(CHRONICLE_ENTRY_FILE)) {
+      fs.unlinkSync(CHRONICLE_ENTRY_FILE);
+    }
+    const evidenceItems = selectChronicleEvidence(newsItems, dateISO);
+    const evidenceText = formatChronicleEvidence(evidenceItems);
+    const candidatePrompt = `你是《AI编年史》的事件编辑。请从证据中合并重复报道，找出0-4个值得进入复审的事件候选。
 
-    const rawText = response?.choices?.[0]?.message?.content?.trim() || '';
-    console.log(`[编年史] 结果: "${rawText.slice(0, 200)}"`);
+这不是多维分类或机械评分任务。用三条朴素的编辑判断：
+- 它是否构成了AI发展路线、产品形态、公司力量、安全治理或社会关系的真实转折；
+- 事实是否具体、已发生、证据扎实，而不是标题党、融资传闻或“若成功”的想象；
+- 一两年后回看这段历史，人们是否仍需要用它解释这个阶段。
 
-    if (rawText.includes('无更新') || !rawText) {
-      console.log('[编年史] 今日无重大事件，不更新');
+重点关注 Anthropic、OpenAI，以及 Google DeepMind、Meta、DeepSeek、NVIDIA 等真正影响前沿方向的公司和机构。重点关注不等于逢更新必收：常规版本、小功能、营销表态和单纯融资仍应排除。
+同一事件的多篇报道必须合并。事件日期使用事实发生或正式发布的日期，不使用抓取日期。
+
+证据（编号将用于引用）：
+${evidenceText}
+
+只输出JSON对象，不要Markdown：
+{"candidates":[{"eventDate":"${dateStrCN}","event":"已经发生的具体事实","why":"为什么未来回看仍值得记录","sourceIds":[1,2],"status":"record或watch"}]}
+没有候选时输出 {"candidates":[]}。`;
+
+    console.log('[编年史] 第一轮：聚类并提出候选...');
+    const candidateResult = await callChronicleJson(candidatePrompt, '候选提取');
+    const rawCandidates = Array.isArray(candidateResult.candidates) ? candidateResult.candidates : [];
+    const recordCandidates = [];
+    for (const candidate of rawCandidates) {
+      if (candidate?.status !== 'record') continue;
+      const checked = validateChronicleCandidate(candidate, evidenceItems);
+      if (!checked.pass) {
+        console.log(`[编年史] 候选被本地门禁拒绝: ${checked.reason}`);
+        continue;
+      }
+      recordCandidates.push(checked.candidate);
+    }
+    if (recordCandidates.length === 0) {
+      console.log('[编年史] 没有达到复审标准的候选，不更新');
       return;
     }
 
-    const result = insertChronicleEntry(existingChronicle, rawText, {
-      year,
-      month,
-      dateISO,
-      dateStrCN,
-    });
+    const recentContext = extractRecentChronicleContext(existingChronicle, 12000, year);
+    const reviewPrompt = `你是《AI编年史》的终审编辑。请对候选做保守但不迟钝的终审，最终保留0-2条。
 
-    if (!result.updated && result.reason === 'date-exists-merge-failed') {
-      console.log('[编年史] 同日合并失败，跳过');
+终审要求：
+- 对照现有编年史，拒绝同一事件换一种说法后的重复收录；
+- 只保留证据真正支持的表述，不扩大结论，不把预测写成事实；
+- Anthropic、OpenAI 等核心公司的重大模型、产品范式、安全治理和权力结构变化值得重点看，但普通更新仍不收；
+- “为什么重要”必须解释历史转折，不写空泛的“影响深远”；
+- 不做分类，不输出分数。
+
+现有近期编年史：
+${recentContext}
+
+候选：
+${JSON.stringify(recordCandidates, null, 2)}
+
+证据编号表：
+${evidenceText}
+
+只输出JSON对象，不要Markdown：
+{"entries":[{"eventDate":"${dateStrCN}","event":"完整、可核验的事件事实","why":"具体的历史意义","sourceIds":[1,2]}]}
+没有应收录事件时输出 {"entries":[]}。`;
+
+    console.log('[编年史] 第二轮：对照既有记录终审...');
+    const reviewResult = await callChronicleJson(reviewPrompt, '终审');
+    const reviewedEntries = Array.isArray(reviewResult.entries) ? reviewResult.entries.slice(0, 2) : [];
+    let content = existingChronicle;
+    const appliedEntries = [];
+    const seen = new Set();
+    for (const candidate of reviewedEntries) {
+      const checked = validateChronicleCandidate(candidate, evidenceItems);
+      if (!checked.pass) {
+        console.log(`[编年史] 终审条目被本地门禁拒绝: ${checked.reason}`);
+        continue;
+      }
+      const uniqueKey = `${checked.candidate.eventDate}|${checked.candidate.event}`.toLowerCase();
+      if (seen.has(uniqueKey)) continue;
+      seen.add(uniqueKey);
+      const entryText = buildChronicleEntry(checked.candidate, evidenceItems);
+      const quality = validateChronicleEntry(entryText);
+      if (!quality.pass) {
+        console.log(`[编年史] 完整性门禁拒绝条目: ${quality.reason}`);
+        continue;
+      }
+      const result = insertChronicleEntry(content, entryText, {
+        year,
+        month,
+        dateISO,
+        dateStrCN,
+      });
+      if (!result.updated) {
+        console.log(`[编年史] 跳过新增条目: ${result.reason}`);
+        continue;
+      }
+      content = result.content;
+      appliedEntries.push(result.entryText);
+    }
+
+    if (appliedEntries.length === 0) {
+      console.log('[编年史] 终审后无可安全写入条目，不更新');
       return;
     }
-
-    if (!result.updated) {
-      console.log(`[编年史] 未产生可写入条目: ${result.reason}`);
-      return;
-    }
-
-    if (result.reason === 'appended-to-date') {
-      console.log('[编年史] 同日已有条目，追加合并');
-    }
-
+    const artifactText = appliedEntries.join('\n\n');
     if (CHRONICLE_ENTRY_FILE) {
-      writeChronicleEntryArtifact(CHRONICLE_ENTRY_FILE, result.entryText);
-      console.log(`[编年史] 已写入新增条目 artifact: ${CHRONICLE_ENTRY_FILE}`);
+      writeChronicleEntryArtifact(CHRONICLE_ENTRY_FILE, artifactText);
+      console.log(`[编年史] 已写入 ${appliedEntries.length} 条新增 artifact: ${CHRONICLE_ENTRY_FILE}`);
     }
-
-    fs.writeFileSync(CHRONICLE_FILE, result.content, 'utf-8');
-    console.log(`[编年史] 已更新: ${result.entryText.split('\n')[0]}`);
+    fs.writeFileSync(CHRONICLE_FILE, content, 'utf-8');
+    appliedEntries.forEach(entry => console.log(`[编年史] 已更新: ${entry.split('\n')[0]}`));
   } catch (err) {
-    console.error('[编年史] 更新失败:', err.message);
+    console.error('[编年史] 更新失败，已安全跳过，不写入残缺内容:', err.message);
   }
 }
 
