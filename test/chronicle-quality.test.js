@@ -49,6 +49,37 @@ test('official primary source can pass while an unsupported single media source 
   assert.match(result.reason, /独立来源|官方/);
 });
 
+test('expanded official research and policy sources can stand as primary evidence', () => {
+  for (const source of ['Microsoft Research', 'Apple ML Research', 'Berkeley AI Research', 'UK AI Security Institute', 'NIST']) {
+    const result = validateChronicleCandidate({ ...candidate, sourceIds: [1] }, [{
+      source,
+      title: 'A documented AI milestone',
+      link: `https://example.com/${encodeURIComponent(source)}`,
+    }]);
+    assert.equal(result.pass, true, source);
+  }
+});
+
+test('two links from the same non-official source are not independent evidence', () => {
+  const sameSourceEvidence = [
+    { source: 'arXiv cs.AI', title: 'Paper one', link: 'https://arxiv.org/abs/2607.00001' },
+    { source: 'arXiv cs.AI', title: 'Paper two', link: 'https://arxiv.org/abs/2607.00002' },
+  ];
+  const result = validateChronicleCandidate({ ...candidate, sourceIds: [1, 2] }, sameSourceEvidence);
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /独立来源/);
+});
+
+test('chronicle event prose stays concise', () => {
+  const result = validateChronicleCandidate({
+    ...candidate,
+    event: '这是一段已经发生但被不必要地写得过长的事件描述。'.repeat(12),
+    sourceIds: [1],
+  }, evidence);
+  assert.equal(result.pass, false);
+  assert.match(result.reason, /过长|简洁风格/);
+});
+
 test('code renders a complete cited entry and rejects truncated prose', () => {
   const entry = buildChronicleEntry(candidate, evidence);
   assert.equal(validateChronicleEntry(entry).pass, true);

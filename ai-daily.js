@@ -118,10 +118,22 @@ const RSS_SOURCES = [
   { url: 'https://venturebeat.com/category/ai/feed/', name: 'VentureBeat' },
   { url: 'https://9to5google.com/feed/', name: '9to5Google', requireAIKeyword: true },
   { url: 'https://importai.net/feed/', name: 'Import AI' },
+  { url: 'https://www.interconnects.ai/feed', name: 'Interconnects' },
   { url: 'https://huggingface.co/blog/feed.xml', name: 'Hugging Face Blog' },
   { url: 'https://stratechery.com/feed/', name: 'Stratechery', requireAIKeyword: true },
   { url: 'https://openai.com/news/rss.xml', name: 'OpenAI News' },
   { url: 'https://blogs.nvidia.com/feed/', name: 'NVIDIA Blog', requireAIKeyword: true },
+  { url: 'https://www.microsoft.com/en-us/research/feed/', name: 'Microsoft Research', requireAIKeyword: true },
+  { url: 'https://machinelearning.apple.com/rss.xml', name: 'Apple ML Research' },
+  { url: 'https://bair.berkeley.edu/blog/feed.xml', name: 'Berkeley AI Research' },
+  { url: 'https://rss.arxiv.org/rss/cs.AI', name: 'arXiv cs.AI' },
+  { url: 'https://rss.arxiv.org/rss/cs.CL', name: 'arXiv cs.CL' },
+  { url: 'https://rss.arxiv.org/rss/cs.RO', name: 'arXiv cs.RO' },
+  { url: 'https://spectrum.ieee.org/feeds/topic/artificial-intelligence.rss', name: 'IEEE Spectrum AI' },
+  { url: 'https://spectrum.ieee.org/feeds/topic/robotics.rss', name: 'IEEE Spectrum Robotics' },
+  { url: 'https://www.semianalysis.com/feed', name: 'SemiAnalysis', requireAIKeyword: true },
+  { url: 'https://www.gov.uk/government/organisations/ai-security-institute.atom', name: 'UK AI Security Institute' },
+  { url: 'https://www.nist.gov/news-events/news/rss.xml', name: 'NIST', requireAIKeyword: true },
   { url: 'https://www.marktechpost.com/feed/', name: 'MarkTechPost' },
 ];
 
@@ -156,14 +168,26 @@ const SOURCE_IMPORTANCE_WEIGHTS = new Map([
   ['OpenAI News', 12],
   ['Google DeepMind', 11],
   ['NVIDIA Blog', 9],
+  ['UK AI Security Institute', 9],
+  ['Microsoft Research', 8],
+  ['Apple ML Research', 8],
+  ['NIST', 8],
   ['MIT Tech Review', 7],
   ['Stratechery', 7],
+  ['Berkeley AI Research', 7],
+  ['SemiAnalysis', 7],
   ['TechCrunch', 6],
   ['The Verge', 6],
+  ['Interconnects', 6],
+  ['IEEE Spectrum AI', 6],
+  ['IEEE Spectrum Robotics', 6],
   ['VentureBeat', 5],
   ['Ars Technica', 5],
   ['Hugging Face Blog', 5],
   ['量子位', 5],
+  ['arXiv cs.AI', 4],
+  ['arXiv cs.CL', 4],
+  ['arXiv cs.RO', 4],
   ['36氪', 4],
   ['Import AI', 4],
   ['MarkTechPost', 3],
@@ -872,7 +896,9 @@ function selectChronicleEvidence(newsItems, dateISO) {
   const rollingItems = loadRecentDailyEvidence(dateISO);
   const combined = dedupeNewsItems([...newsItems, ...rollingItems]);
   const ranked = rankNewsItems(combined);
-  const selected = selectWithSourceCap(ranked, CHRONICLE_NEWS_LIMIT, 8);
+  // 控制单一来源占比，让扩展后的研究、机器人、政策与基础设施来源
+  // 真正进入候选池，而不是被少数高频媒体淹没。
+  const selected = selectWithSourceCap(ranked, CHRONICLE_NEWS_LIMIT, 5);
   console.log(`[编年史] 候选证据 ${selected.length} 条（含近 ${CHRONICLE_LOOKBACK_DAYS} 天回看 ${rollingItems.length} 条）`);
   console.log(`[编年史] 证据来源: ${formatSourceDistribution(selected)}`);
   return selected;
@@ -935,7 +961,9 @@ async function updateChronicle(newsItems) {
 - 一两年后回看这段历史，人们是否仍需要用它解释这个阶段。
 
 重点关注 Anthropic、OpenAI，以及 Google DeepMind、Meta、DeepSeek、NVIDIA 等真正影响前沿方向的公司和机构。重点关注不等于逢更新必收：常规版本、小功能、营销表态和单纯融资仍应排除。
+编辑视野要足够宽：除基础模型与智能体，也主动检查芯片和算力、开源生态、机器人与具身智能、关键研究、安全评测、政策与法律、资本和产业结构、教育劳动与社会影响。它们只是检索视野，不是页面分类，也不要求每个方向都收录。
 同一事件的多篇报道必须合并。事件日期使用事实发生或正式发布的日期，不使用抓取日期。
+候选事件保持现有时间线风格：用一到两句简短事实写清“谁、做了什么、达到什么结果”，不写评论文章，不另起“为什么重要”。
 
 证据（编号将用于引用）：
 ${evidenceText}
@@ -969,8 +997,10 @@ ${evidenceText}
 - 对照现有编年史，拒绝同一事件换一种说法后的重复收录；
 - 只保留证据真正支持的表述，不扩大结论，不把预测写成事实；
 - Anthropic、OpenAI 等核心公司的重大模型、产品范式、安全治理和权力结构变化值得重点看，但普通更新仍不收；
+- 不要只盯模型发布；芯片算力、开源、机器人、关键研究、安全评测、政策法律和社会结构的真实转折同样可以入选；
 - “为什么重要”必须解释历史转折，不写空泛的“影响深远”；
 - 不做分类，不输出分数。
+- 最终 event 仍是一到两句克制的事实记录，不展示 why，不写成长段分析。
 
 现有近期编年史：
 ${recentContext}
