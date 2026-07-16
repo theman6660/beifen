@@ -95,6 +95,79 @@ function findInsertAfterExistingDateEntry(content, dateMarker) {
   return insertPoint;
 }
 
+function getEntrySortKey(label, fallbackYear, fallbackMonth) {
+  const yearMatch = String(label || '').match(/(\d{4})年/);
+  const monthMatch = String(label || '').match(/(\d{1,2})月/);
+  const dayMatch = String(label || '').match(/月(\d{1,2})(?:日|[-—至])/);
+  let day = dayMatch ? Number(dayMatch[1]) : 0;
+  const rangeMatch = String(label || '').match(/月\d{1,2}[-—至](\d{1,2})日/);
+  if (rangeMatch) day = Number(rangeMatch[1]);
+  if (/月初/.test(label)) day = 1;
+  if (/月中/.test(label)) day = 15;
+  if (/月末/.test(label)) day = 28;
+  return (Number(yearMatch?.[1] || fallbackYear) * 10000)
+    + (Number(monthMatch?.[1] || fallbackMonth) * 100)
+    + day;
+}
+
+function sortEntryBlocks(body, year, month) {
+  const matches = [...String(body || '').matchAll(/^- \*\*([^*]+)\*\*：/gm)];
+  if (matches.length < 2) return String(body || '').trim();
+  const prefix = String(body || '').slice(0, matches[0].index).trim();
+  const entries = matches.map((match, index) => {
+    const end = index + 1 < matches.length ? matches[index + 1].index : String(body || '').length;
+    return {
+      key: getEntrySortKey(match[1], year, month),
+      originalIndex: index,
+      text: String(body || '').slice(match.index, end).trim(),
+    };
+  }).sort((a, b) => b.key - a.key || a.originalIndex - b.originalIndex);
+  return [prefix, ...entries.map(entry => entry.text)].filter(Boolean).join('\n\n');
+}
+
+function sortMonthBlocks(yearBlock, year) {
+  const headerMatch = String(yearBlock || '').match(/^## \d{4}年\s*/);
+  const bodyStart = headerMatch ? headerMatch[0].length : 0;
+  const body = String(yearBlock || '').slice(bodyStart).replace(/\n*---\s*$/, '').trim();
+  const matches = [...body.matchAll(/^### (\d{1,2})月\s*$/gm)];
+  if (matches.length === 0) return `## ${year}年${body ? `\n\n${body}` : ''}`;
+  const prefix = body.slice(0, matches[0].index).trim();
+  const months = matches.map((match, index) => {
+    const month = Number(match[1]);
+    const sectionStart = match.index + match[0].length;
+    const end = index + 1 < matches.length ? matches[index + 1].index : body.length;
+    const sectionBody = body.slice(sectionStart, end).trim();
+    return {
+      month,
+      text: `### ${month}月${sectionBody ? `\n\n${sortEntryBlocks(sectionBody, year, month)}` : ''}`,
+    };
+  }).sort((a, b) => b.month - a.month);
+  return [`## ${year}年`, prefix, ...months.map(item => item.text)].filter(Boolean).join('\n\n');
+}
+
+function sortChronicleContent(content) {
+  const text = String(content || '');
+  const matches = [...text.matchAll(/^## (\d{4})年\s*$/gm)];
+  if (matches.length === 0) return text;
+  const prefix = text.slice(0, matches[0].index).replace(/\n*---\s*$/, '').trimEnd();
+  const years = matches.map((match, index) => {
+    const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
+    return {
+      year: Number(match[1]),
+      text: sortMonthBlocks(text.slice(match.index, end), Number(match[1])),
+    };
+  }).sort((a, b) => b.year - a.year);
+  return `${prefix}\n\n---\n\n${years.map(item => item.text).join('\n\n---\n\n')}\n`;
+}
+
+function stripChronicleAnalysis(content) {
+  return String(content || '')
+    .split(/\r?\n/)
+    .filter(line => !/^\s+- \*\*(?:为什么重要|意义)\*\*：/.test(line))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 function insertChronicleEntry(existingChronicle, rawEntry, {
   year,
   month,
@@ -130,7 +203,7 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
       return {
         updated: true,
         reason: 'appended-to-date',
-        content: updateChronicleDate(merged, dateISO),
+        content: sortChronicleContent(updateChronicleDate(merged, dateISO)),
         entryText,
       };
     }
@@ -182,7 +255,7 @@ function insertChronicleEntry(existingChronicle, rawEntry, {
   return {
     updated: true,
     reason: 'inserted',
-    content: updateChronicleDate(updatedChronicle, dateISO),
+    content: sortChronicleContent(updateChronicleDate(updatedChronicle, dateISO)),
     entryText,
   };
 }
@@ -198,5 +271,7 @@ module.exports = {
   ensureChroniclePermalink,
   insertChronicleEntry,
   normalizeChronicleEntry,
+  sortChronicleContent,
+  stripChronicleAnalysis,
   writeChronicleEntryArtifact,
 };

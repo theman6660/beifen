@@ -2,7 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { insertChronicleEntry } = require('../chronicle-utils');
+const {
+  insertChronicleEntry,
+  sortChronicleContent,
+  stripChronicleAnalysis,
+} = require('../chronicle-utils');
 const {
   buildChronicleEntry,
   extractChronicleEntryDate,
@@ -48,14 +52,9 @@ test('official primary source can pass while an unsupported single media source 
 test('code renders a complete cited entry and rejects truncated prose', () => {
   const entry = buildChronicleEntry(candidate, evidence);
   assert.equal(validateChronicleEntry(entry).pass, true);
+  assert.doesNotMatch(entry, /为什么重要|\*\*意义\*\*/);
   const truncated = '- **2026年7月11日**：中国首个十万卡算力集群正式落成，完全基于国产';
   assert.equal(validateChronicleEntry(truncated).pass, false);
-  const shallow = [
-    '- **2026年7月15日**：某项已经完整发布的人工智能系统。',
-    '  - **为什么重要**：影响深远。',
-    '  - **来源**：[Anthropic Official](https://www.anthropic.com/news/example)',
-  ].join('\n');
-  assert.equal(validateChronicleEntry(shallow).pass, false);
 });
 
 test('daily report references become rolling chronicle evidence', () => {
@@ -94,5 +93,14 @@ test('multi-entry artifacts split cleanly and use each event date for placement'
     dateStrCN: '2026年7月16日',
   });
   assert.equal(result.updated, true);
-  assert.match(result.content, /### 6月[\s\S]*2026年6月30日[\s\S]*### 7月/);
+  assert.match(result.content, /### 7月[\s\S]*### 6月[\s\S]*2026年6月30日/);
+});
+
+test('chronicle normalization removes visible analysis and sorts newest first', () => {
+  const input = `---\ntitle: test\ndate: 2026-07-16 08:00:00\n---\n\n# title\n\n---\n\n## 2025年\n\n### 1月\n\n- **2025年1月1日**：旧事件。\n  - **为什么重要**：旧分析。\n\n## 2026年\n\n### 6月\n\n- **2026年6月11日**：较早事件。\n  - **意义**：较早分析。\n\n- **2026年6月11-12日**：较新事件。\n\n### 7月\n\n- **2026年7月1日**：最新事件。\n`;
+  const normalized = sortChronicleContent(stripChronicleAnalysis(input));
+  assert.doesNotMatch(normalized, /为什么重要|\*\*意义\*\*/);
+  assert.ok(normalized.indexOf('## 2026年') < normalized.indexOf('## 2025年'));
+  assert.ok(normalized.indexOf('### 7月') < normalized.indexOf('### 6月'));
+  assert.ok(normalized.indexOf('6月11-12日') < normalized.indexOf('6月11日'));
 });

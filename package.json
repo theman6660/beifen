@@ -7,7 +7,8 @@
   },
   "scripts": {
     "build": "hexo generate",
-    "check": "node tools/check-source-safety.js && node tools/validate-daily-posts.js && node --check ai-daily.js && node --check society-daily.js && node --check diary-generator.js && node --check chronicle-utils.js && node --check lib/chronicle-quality.js && node --check lib/markdown-safety.js && node --check tools/apply-chronicle-entry.js && node --check tools/write-deploy-status.js && node --check source/js/accessibility.js && node --check workers/daily-report-sentinel/src/index.js",
+    "check": "node tools/check-source-safety.js && node tools/validate-daily-posts.js && node --check ai-daily.js && node --check society-daily.js && node --check diary-generator.js && node --check chronicle-utils.js && node --check lib/chronicle-quality.js && node --check lib/markdown-safety.js && node --check tools/apply-chronicle-entry.js && node --check tools/normalize-ai-chronicle.js && node --check tools/write-deploy-status.js && node --check source/js/accessibility.js && node --check workers/daily-report-sentinel/src/index.js",
+    "chronicle:normalize": "node tools/normalize-ai-chronicle.js",
     "clean": "hexo clean",
     "deploy": "pwsh -NoProfile -File tools/request-site-redeploy.ps1",
     "server": "hexo server",
