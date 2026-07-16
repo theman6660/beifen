@@ -27,22 +27,37 @@ jobs:
       changed: ${{ steps.commit.outputs.changed }}
       source_sha: ${{ steps.commit.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v6
-        with: { node-version: '22', cache: npm }
-      - run: npm ci
-      - name: Sync latest source branch
-        run: git pull --ff-only origin main
-      - name: Require private dated snippet payload
+      - name: Check private dated snippet payload
+        id: input
         env:
           DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ -z "$DIARY_SNIPPETS_JSON" ]; then
-            echo "DIARY_SNIPPETS_JSON must contain {date, snippets}; raw snippets are never read from the repository."
+          if [ -n "$DIARY_SNIPPETS_JSON" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "::error::DIARY_SNIPPETS_JSON must contain {date, snippets}."
             exit 1
           fi
+
+          echo "::notice::No DIARY_SNIPPETS_JSON secret is configured; skipping the scheduled diary run."
+      - uses: actions/checkout@v6
+        if: steps.input.outputs.available == 'true'
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v6
+        if: steps.input.outputs.available == 'true'
+        with: { node-version: '22', cache: npm }
+      - if: steps.input.outputs.available == 'true'
+        run: npm ci
+      - name: Sync latest source branch
+        if: steps.input.outputs.available == 'true'
+        run: git pull --ff-only origin main
       - name: Generate diary from private input
+        if: steps.input.outputs.available == 'true'
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
@@ -53,6 +68,7 @@ jobs:
           if [ "$FORCE_RUN" = "true" ]; then args+=(--force); fi
           node diary-generator.js "${args[@]}"
       - name: Commit diary only
+        if: steps.input.outputs.available == 'true'
         id: commit
         run: |
           set -euo pipefail
