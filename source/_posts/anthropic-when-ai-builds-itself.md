@@ -1,7 +1,6 @@
 ---
 title: When AI Builds Itself
 date: 2026-06-05 22:00:00
-sticky: 70
 categories: [技术深度]
 tags: [AI, Anthropic, 递归自我改进, RSI, AGI, 对齐, 翻译]
 ---

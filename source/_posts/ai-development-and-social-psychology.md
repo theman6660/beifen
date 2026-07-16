@@ -1,7 +1,6 @@
 ---
 title: 从GPT到Claude：AI狂飙三年，我们的心理发生了什么变化
 date: 2026-05-02 18:00:00
-sticky: 60
 categories: [思想随笔]
 tags: [社会心理, 技术哲学, AI]
 ---

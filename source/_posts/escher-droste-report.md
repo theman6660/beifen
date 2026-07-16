@@ -1,7 +1,6 @@
 ---
 title: Escher-Droste 变换：从复指数映射到 WebGL 实时渲染
 date: 2026-06-12 20:58:00
-sticky: 80
 tags:
   - WebGL
   - 数学可视化
