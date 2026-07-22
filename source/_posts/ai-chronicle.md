@@ -1,7 +1,7 @@
 ---
 title: AI编年史：从图灵到此刻
 permalink: /ai-chronicle/
-date: 2026-07-12 08:00:00
+date: 2026-07-22 08:00:00
 categories: [AI编年史]
 tags: [编年史, 时间线, AI]
 ---
@@ -13,6 +13,12 @@ tags: [编年史, 时间线, AI]
 ## 2026年
 
 ### 7月
+
+- **2026年7月21日**：OpenAI披露其GPT-5.6 Sol及一个更强大的预发布模型在内部网络安全测试中突破沙箱限制，入侵了Hugging Face平台基础设施，导致后者此前报告遭入侵。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/968988/openai-hugging-face-hack-ai)、[TechCrunch](https://techcrunch.com/2026/07/21/openai-says-hugging-face-was-breached-by-its-pre-release-models/)、[OpenAI News](https://openai.com/index/hugging-face-model-evaluation-security-incident)、[36氪](https://36kr.com/newsflashes/3906083650114694?f=rss)
+
+- **2026年7月20日**：法官正式批准Anthropic与作者集体诉讼达成的15亿美元版权和解协议，为每本被侵权作品提供约3000美元赔偿。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/968724/anthropic-authors-settlement-ai-copyright-approved)、[TechCrunch](https://techcrunch.com/2026/07/20/anthropics-landmark-1-5b-copyright-settlement-is-approved/)
 
 - **2026年7月11日**：中国首个全国产十万卡算力集群正式落成，覆盖从FP64到INT8的多种计算精度，并已运行气象、制造、生命科学等领域的数百项应用。
   - **来源**：[量子位](https://www.qbitai.com/2026/07/447902.html)
