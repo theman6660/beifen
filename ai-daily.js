@@ -28,6 +28,12 @@ const {
   validateChronicleCandidate,
   validateChronicleEntry,
 } = require('./lib/chronicle-quality');
+const {
+  extractPublishedAt,
+  formatNewsItemForPrompt,
+  interpretQualityResponse,
+  isPublishedWithin,
+} = require('./lib/daily-report-quality');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -469,23 +475,40 @@ async function fetchSitemapNews(source, yesterday) {
   const xml = await fetchText(source.url);
   const matches = [...xml.matchAll(/<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>/g)];
   const nowPlusOneDay = Date.now() + 864e5;
-  const items = matches
+  const candidates = matches
     .map(match => ({ link: decodeXml(match[1]), lastmod: decodeXml(match[2]) }))
     .filter(item => source.pathPattern.test(item.link))
     .map(item => ({ ...item, timestamp: new Date(item.lastmod).getTime() }))
     .filter(item => Number.isFinite(item.timestamp) && item.timestamp >= yesterday.getTime() && item.timestamp <= nowPlusOneDay)
     .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, source.maxItems)
-    .map(item => sanitizeNewsItem({
+    .slice(0, source.maxItems * 3);
+
+  // sitemap.lastmod 只表示页面最近被修改，旧发布页可能因站点重建而批量变新。
+  // 逐页读取真实发布日期，避免把历史模型发布误报成今日新闻。
+  const pageResults = await Promise.allSettled(candidates.map(async (item) => {
+    const html = await fetchText(item.link);
+    const publishedAt = extractPublishedAt(html);
+    if (!isPublishedWithin(publishedAt, yesterday, nowPlusOneDay)) return null;
+    const publishedTimestamp = Date.parse(publishedAt);
+    return sanitizeNewsItem({
       title: titleFromUrl(item.link),
       link: item.link,
-      date: item.lastmod,
+      date: publishedAt,
       source: source.name,
-      snippet: `${source.name} 官方发布页`,
-      _timestamp: item.timestamp,
-    }));
-  console.log(`  -> ${source.name}：获取 ${items.length} 条官方更新`);
-  return items;
+      snippet: `${source.name} 官方发布，发布日期 ${publishedAt.slice(0, 10)}`,
+      _timestamp: publishedTimestamp,
+    });
+  }));
+
+  const verifiedItems = pageResults
+    .filter(result => result.status === 'fulfilled' && result.value)
+    .map(result => result.value)
+    .sort((a, b) => b._timestamp - a._timestamp)
+    .slice(0, source.maxItems);
+  const rejectedCount = pageResults.filter(result => result.status === 'fulfilled' && !result.value).length;
+  const failedCount = pageResults.filter(result => result.status === 'rejected').length;
+  console.log(`  -> ${source.name}：验证 ${candidates.length} 个近期修改页，接受 ${verifiedItems.length} 条真实近期发布，排除 ${rejectedCount} 条旧页面${failedCount ? `，${failedCount} 页读取失败` : ''}`);
+  return verifiedItems;
 }
 
 function dedupeNewsItems(items) {
@@ -596,11 +619,13 @@ async function generateReport(newsItems) {
     console.log(`[提示] 新闻共 ${newsItems.length} 条，取前 ${MAX_NEWS} 条用于生成`);
   }
 
-  const newsText = newsItems.slice(0, MAX_NEWS).map((item, i) =>
-    `${i + 1}. [${item.source}] ${item.title}\n   重要性线索: ${item._priorityReason || '来源覆盖'}\n   链接: ${item.link}\n   摘要: ${(item.snippet || '').slice(0, PROMPT_SNIPPET_CHARS)}`
-  ).join('\n\n');
+  const newsText = newsItems.slice(0, MAX_NEWS)
+    .map((item, i) => formatNewsItemForPrompt(item, i, PROMPT_SNIPPET_CHARS))
+    .join('\n\n');
 
   const prompt = `你是资深AI行业信息编辑和分析师。根据以下近期AI新闻，生成一份中文行业日报。
+
+日报日期：${dateISO}
 
 核心目标：让读者尽可能广地掌握今日AI行业信息版图。优先覆盖重要信息、不同来源、不同主题；深度分析点到为止，不为了显得深而展开长文。
 
@@ -641,7 +666,8 @@ ${newsText}
    - 同一公司名可以因不同事件多次出现，但同一事件不要换标题重复写。
    - 如果某个分类板块没有足够未重复材料，可以缩短或跳过，不要为了凑板块复述。
 8. 不要编造来源；不要输出参考来源列表，脚本会自动追加
-9. 直接输出文章内容，不要加markdown代码块标记`;
+9. 严格按每条素材的"发布日期"判断时效；不得把历史发布写成今日、近日、一周内发生，不得自行推断未在素材中出现的发布时间或发布顺序
+10. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await getClient().chat.completions.create({
@@ -654,13 +680,18 @@ ${newsText}
   return content?.trim() || '';
 }
 
-async function checkQuality(report) {
+async function checkQuality(report, newsItems) {
   const localResult = localQualityCheck(report);
   if (!localResult.pass) {
     console.log(`[质检] 本地硬检查失败: ${localResult.reason}`);
     return localResult;
   }
 
+  const evidence = newsItems.slice(0, PROMPT_NEWS_LIMIT).map((item, index) => [
+    `${index + 1}. [${item.source}] ${item.title}`,
+    `日期: ${item.date || '未知'}`,
+    `摘要: ${(item.snippet || '').slice(0, 220)}`,
+  ].join(' | ')).join('\n');
   const checkPrompt = `评估以下AI行业日报的质量。只需回复"PASS"或"FAIL: <原因>"。
 
 检查标准：
@@ -669,7 +700,11 @@ async function checkQuality(report) {
 3. 是否覆盖多个主题方向，而不是只围绕1-2条新闻展开？
 4. 是否避免编造来源、参考来源列表、markdown代码块？
 5. 是否避免同一新闻事实在"重点信号""行业动态""商业动态""观察备忘"之间反复重述？如果同一事件只是换句话重复出现，应 FAIL。
-6. 字数长短、分析深度不作为失败理由；只在结构明显缺失、信息覆盖明显过窄或重复明显时 FAIL。
+6. 对照素材日期，是否把历史发布误写成今日、近日、一周内发生，或编造素材没有支持的发布顺序？出现即 FAIL。
+7. 字数长短、分析深度不作为失败理由；只在结构明显缺失、信息覆盖明显过窄、事实时间错误或重复明显时 FAIL。
+
+素材证据：
+${evidence}
 
 文章内容：
 ${report.slice(0, 4000)}`;
@@ -678,20 +713,17 @@ ${report.slice(0, 4000)}`;
     console.log('[质检] 评估生成质量...');
     const response = await getClient().chat.completions.create({
       model: MODEL,
-      max_tokens: 200,
+      max_tokens: 1200,
       messages: [{ role: 'user', content: checkPrompt }],
     });
 
-    const result = response?.choices?.[0]?.message?.content?.trim() || '';
-    console.log(`[质检] 结果: ${result}`);
-    if (!result) {
-      console.log('[质检] 模型返回空内容，默认通过');
-      return { pass: true, reason: '模型返回空，默认通过' };
-    }
-    return { pass: result.startsWith('PASS'), reason: result };
+    const choice = response?.choices?.[0];
+    const result = choice?.message?.content?.trim() || '';
+    console.log(`[质检] finish_reason=${choice?.finish_reason || 'unknown'}，结果: ${result}`);
+    return interpretQualityResponse(result);
   } catch (err) {
-    console.log(`[质检] 评估失败，默认通过: ${err.message}`);
-    return { pass: true, reason: '质检异常，跳过' };
+    console.log(`[质检] 评估失败，拒绝放行: ${err.message}`);
+    return { pass: false, reason: `质检异常: ${err.message}` };
   }
 }
 
@@ -770,16 +802,6 @@ function validateSourceCoverage(newsItems) {
   return { pass: true, reason: '素材覆盖通过' };
 }
 
-function scoreReport(report) {
-  const plainText = report
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/[#>*_`[\]()!\-]/g, '')
-    .replace(/\s+/g, '');
-  const sectionCount = (report.match(/^##\s+/gm) || []).length;
-  const bulletCount = (report.match(/^\s*[-*]\s+/gm) || []).length;
-  return Math.min(plainText.length, 2500) + sectionCount * 500 + bulletCount * 80;
-}
-
 function formatErrorMessage(err) {
   return [err?.name, err?.code, err?.status, err?.message]
     .filter(Boolean)
@@ -812,9 +834,6 @@ function wait(ms) {
 }
 
 async function generateWithRetry(promptNewsItems, maxRetries = 2) {
-  let bestReport = '';
-  let bestScore = 0;
-
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
@@ -839,7 +858,7 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
       continue;
     }
 
-    const { pass, reason } = await checkQuality(report);
+    const { pass, reason } = await checkQuality(report, promptNewsItems);
 
     if (pass) {
       console.log('[质检] 通过！');
@@ -847,21 +866,9 @@ async function generateWithRetry(promptNewsItems, maxRetries = 2) {
     }
 
     console.log(`[质检] 未通过: ${reason}`);
-    const hardCheck = localQualityCheck(report);
-    if (hardCheck.pass) {
-      const score = scoreReport(report);
-      if (score > bestScore) {
-        bestScore = score;
-        bestReport = report;
-      }
-    }
   }
 
-  if (bestReport) {
-    console.warn('[质检] 主观模型质检未通过，但本地硬检查通过；采用评分最高的安全结果');
-    return bestReport;
-  }
-  throw new Error('所有生成结果均未通过本地硬检查，拒绝发布');
+  throw new Error('所有生成结果均未通过完整质检，拒绝发布');
 }
 
 function normalizeReport(report, title) {

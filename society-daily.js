@@ -16,6 +16,9 @@ const {
   normalizeReport: normalizeSafeReport,
   sanitizeNewsItem,
 } = require('./lib/markdown-safety');
+const {
+  interpretQualityResponse,
+} = require('./lib/daily-report-quality');
 
 // ============ 配置 ============
 const PROXY_URL = (process.env.PROXY_URL || '').trim();
@@ -456,20 +459,17 @@ ${report.slice(0, 4000)}`;
     console.log('[质检] 评估生成质量...');
     const response = await getClient().chat.completions.create({
       model: MODEL,
-      max_tokens: 200,
+      max_tokens: 1200,
       messages: [{ role: 'user', content: checkPrompt }],
     });
 
-    const result = response?.choices?.[0]?.message?.content?.trim() || '';
-    console.log(`[质检] 结果: ${result}`);
-    if (!result) {
-      console.log('[质检] 模型返回空内容，默认通过');
-      return { pass: true, reason: '模型返回空，默认通过' };
-    }
-    return { pass: result.startsWith('PASS'), reason: result };
+    const choice = response?.choices?.[0];
+    const result = choice?.message?.content?.trim() || '';
+    console.log(`[质检] finish_reason=${choice?.finish_reason || 'unknown'}，结果: ${result}`);
+    return interpretQualityResponse(result);
   } catch (err) {
-    console.log(`[质检] 评估失败，默认通过: ${err.message}`);
-    return { pass: true, reason: '质检异常，跳过' };
+    console.log(`[质检] 评估失败，拒绝放行: ${err.message}`);
+    return { pass: false, reason: `质检异常: ${err.message}` };
   }
 }
 
@@ -567,16 +567,6 @@ function validateSourceCoverage(newsItems) {
   return { pass: true, reason: '素材覆盖通过' };
 }
 
-function scoreReport(report) {
-  const plainText = report
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/[#>*_`[\]()!\-]/g, '')
-    .replace(/\s+/g, '');
-  const sectionCount = (report.match(/^##\s+/gm) || []).length;
-  const bulletCount = (report.match(/^\s*[-*]\s+/gm) || []).length;
-  return Math.min(plainText.length, 2200) + sectionCount * 500 + bulletCount * 80;
-}
-
 function formatErrorMessage(err) {
   return [err?.name, err?.code, err?.status, err?.message]
     .filter(Boolean)
@@ -609,9 +599,6 @@ function wait(ms) {
 }
 
 async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
-  let bestReport = '';
-  let bestScore = 0;
-
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
@@ -644,21 +631,9 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
     }
 
     console.log(`[质检] 未通过: ${reason}`);
-    const hardCheck = localQualityCheck(report);
-    if (hardCheck.pass) {
-      const score = scoreReport(report);
-      if (score > bestScore) {
-        bestScore = score;
-        bestReport = report;
-      }
-    }
   }
 
-  if (bestReport) {
-    console.warn('[质检] 主观模型质检未通过，但本地硬检查通过；采用评分最高的安全结果');
-    return bestReport;
-  }
-  throw new Error('所有生成结果均未通过本地硬检查，拒绝发布');
+  throw new Error('所有生成结果均未通过完整质检，拒绝发布');
 }
 
 function normalizeReport(report, title) {
