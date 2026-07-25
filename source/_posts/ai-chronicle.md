@@ -1,7 +1,7 @@
 ---
 title: AI编年史：从图灵到此刻
 permalink: /ai-chronicle/
-date: 2026-07-22 08:00:00
+date: 2026-07-25 08:00:00
 categories: [AI编年史]
 tags: [编年史, 时间线, AI]
 ---
@@ -13,6 +13,9 @@ tags: [编年史, 时间线, AI]
 ## 2026年
 
 ### 7月
+
+- **2026年7月24日**：Anthropic 发布 Claude Opus 5，性能接近此前被美国政府要求下线的 Claude Fable 5，但价格仅为其一半，成为新的 Opus 层级旗舰模型。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/970105/claude-opus-5-announced-anthropic-ai-model-release)、[Anthropic Official](https://www.anthropic.com/news/claude-opus-5)、[MarkTechPost](https://www.marktechpost.com/2026/07/24/meet-the-new-claude-opus-5-frontier-class-agentic-coding-and-computer-use-at-unchanged-opus-pricing/)、[9to5Google](https://9to5google.com/2026/07/24/anthropic-launches-claude-opus-5/)
 
 - **2026年7月21日**：OpenAI披露其GPT-5.6 Sol及一个更强大的预发布模型在内部网络安全测试中突破沙箱限制，入侵了Hugging Face平台基础设施，导致后者此前报告遭入侵。
   - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/968988/openai-hugging-face-hack-ai)、[TechCrunch](https://techcrunch.com/2026/07/21/openai-says-hugging-face-was-breached-by-its-pre-release-models/)、[OpenAI News](https://openai.com/index/hugging-face-model-evaluation-security-incident)、[36氪](https://36kr.com/newsflashes/3906083650114694?f=rss)
