@@ -259,7 +259,7 @@ home:
     enable: true # Whether to enable sidebar
     position: left # Sidebar position. left, right
     first_item: info # First item in sidebar. menu, info
-    announcement: 首页优先展示个人精选；每日自动更新请从「日报」导航进入。
+    announcement:
     show_on_mobile: true # Whether to show sidebar navigation on mobile sheet menu
     links: {}
   # Article date format
