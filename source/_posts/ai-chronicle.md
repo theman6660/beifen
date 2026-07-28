@@ -1,7 +1,7 @@
 ---
 title: AI编年史：从图灵到此刻
 permalink: /ai-chronicle/
-date: 2026-07-25 08:00:00
+date: 2026-07-28 08:00:00
 categories: [AI编年史]
 tags: [编年史, 时间线, AI]
 ---
@@ -13,6 +13,9 @@ tags: [编年史, 时间线, AI]
 ## 2026年
 
 ### 7月
+
+- **2026年7月27日**：NVIDIA、微软、SpaceX、IBM等数十家公司成立“开放安全AI联盟”，推动开源AI安全工具，OpenAI、Google和Anthropic集体缺席。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/971281/nvidia-open-secure-ai-alliance-cybersecurity)、[36氪](https://36kr.com/p/3913320648971395?f=rss)
 
 - **2026年7月24日**：Anthropic 发布 Claude Opus 5，性能接近此前被美国政府要求下线的 Claude Fable 5，但价格仅为其一半，成为新的 Opus 层级旗舰模型。
   - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/970105/claude-opus-5-announced-anthropic-ai-model-release)、[Anthropic Official](https://www.anthropic.com/news/claude-opus-5)、[MarkTechPost](https://www.marktechpost.com/2026/07/24/meet-the-new-claude-opus-5-frontier-class-agentic-coding-and-computer-use-at-unchanged-opus-pricing/)、[9to5Google](https://9to5google.com/2026/07/24/anthropic-launches-claude-opus-5/)
