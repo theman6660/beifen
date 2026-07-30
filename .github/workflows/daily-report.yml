@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with: { node-version: '22', cache: npm }
       - run: npm ci
       - name: Generate AI Daily
@@ -108,7 +108,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.source_sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with: { node-version: '22', cache: npm }
       - run: npm ci
       - name: Generate Society Daily
@@ -161,7 +161,7 @@ jobs:
             echo "::error::origin/main advanced from $SOURCE_SHA to $current_sha; refusing stale generated artifacts."
             exit 1
           fi
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with: { node-version: '22', cache: npm }
       - run: npm ci
       - uses: actions/download-artifact@v8
