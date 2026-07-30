@@ -4,6 +4,7 @@ const DEFAULT_SOURCE_WORKFLOW = 'daily-report.yml';
 const DEFAULT_REDEPLOY_WORKFLOW = 'manual-site-redeploy.yml';
 const DEFAULT_API_BASE = 'https://api.github.com';
 const DEFAULT_LIVE_SITE = 'https://hanxiaofan.site';
+const DEFAULT_FETCH_TIMEOUT_MS = 10000;
 
 function isTruthy(value) {
   return ['1', 'true', 'yes', 'y', 'on'].includes(String(value || '').toLowerCase());
@@ -40,20 +41,31 @@ function encodePath(value) {
   return value.split('/').map(encodeURIComponent).join('/');
 }
 
+function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
+  return fetch(url, { ...options, signal: AbortSignal.timeout(timeoutMs) });
+}
+
 async function githubRequest(config, requestPath, options = {}) {
+  const {
+    allowNotFound = false,
+    headers: optionHeaders = {},
+    ...fetchOptions
+  } = options;
   const headers = {
     Accept: 'application/vnd.github+json',
     'User-Agent': 'personal-website-daily-report-sentinel',
     'X-GitHub-Api-Version': '2022-11-28',
-    ...(options.headers || {}),
+    ...optionHeaders,
   };
   if (config.token) headers.Authorization = `Bearer ${config.token}`;
-  const response = await fetch(`${config.apiBase}${requestPath}`, { ...options, headers });
+  const response = await fetchWithTimeout(`${config.apiBase}${requestPath}`, { ...fetchOptions, headers });
   const text = await response.text();
-  if (response.status === 404) return { ok: false, status: 404, data: null, text };
+  if (response.status === 404 && allowNotFound) {
+    return { ok: false, status: 404, data: null, text };
+  }
   if (!response.ok) {
     const body = text.length > 500 ? `${text.slice(0, 500)}...` : text;
-    throw new Error(`GitHub API ${options.method || 'GET'} ${requestPath} failed: ${response.status} ${body}`);
+    throw new Error(`GitHub API ${fetchOptions.method || 'GET'} ${requestPath} failed: ${response.status} ${body}`);
   }
   return { ok: true, status: response.status, data: text ? JSON.parse(text) : null, text };
 }
@@ -62,13 +74,16 @@ async function fileExists(config, filePath) {
   const result = await githubRequest(
     config,
     `/repos/${config.repo}/contents/${encodePath(filePath)}?ref=${encodeURIComponent(config.branch)}`,
+    { allowNotFound: true },
   );
   return result.ok;
 }
 
 async function getSourceCommit(config) {
   const result = await githubRequest(config, `/repos/${config.repo}/commits/${encodeURIComponent(config.branch)}`);
-  return result.data?.sha || '';
+  const sha = result.data?.sha || '';
+  if (!sha) throw new Error(`GitHub API returned no commit SHA for ${config.repo}@${config.branch}`);
+  return sha;
 }
 
 async function countRuns(config, workflow, status) {
@@ -81,16 +96,19 @@ async function countRuns(config, workflow, status) {
 }
 
 async function dispatchWorkflow(config, workflow, inputs = undefined) {
-  await githubRequest(config, `/repos/${config.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
+  const result = await githubRequest(config, `/repos/${config.repo}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ref: config.branch, ...(inputs ? { inputs } : {}) }),
   });
+  if (result.status !== 204) {
+    throw new Error(`GitHub workflow dispatch returned unexpected status ${result.status} for ${workflow}`);
+  }
 }
 
 async function readLiveMarker(config) {
   try {
-    const response = await fetch(`${config.liveSiteUrl}/daily-report-status.json?sentinel=${Date.now()}`, {
+    const response = await fetchWithTimeout(`${config.liveSiteUrl}/daily-report-status.json?sentinel=${Date.now()}`, {
       headers: { Accept: 'application/json' },
       redirect: 'follow',
     });
@@ -103,8 +121,10 @@ async function readLiveMarker(config) {
 
 async function livePageExists(url) {
   try {
-    let response = await fetch(url, { method: 'HEAD', redirect: 'follow' });
-    if (response.status === 405) response = await fetch(url, { method: 'GET', redirect: 'follow' });
+    let response = await fetchWithTimeout(url, { method: 'HEAD', redirect: 'follow' });
+    if (response.status === 405) {
+      response = await fetchWithTimeout(url, { method: 'GET', redirect: 'follow' });
+    }
     return response.ok;
   } catch {
     return false;
@@ -126,12 +146,14 @@ async function runSentinel(env, overrides = {}) {
   const config = getConfig(env, overrides);
   const aiPath = `source/_posts/ai-daily-${config.date}.md`;
   const societyPath = `source/_posts/society-daily-${config.date}.md`;
+  const sourceCommit = await getSourceCommit(config);
   const [hasAi, hasSociety] = await Promise.all([fileExists(config, aiPath), fileExists(config, societyPath)]);
   const result = {
     repo: config.repo,
     branch: config.branch,
     date: config.date,
     dryRun: config.dryRun,
+    sourceCommit,
     posts: { ai: { path: aiPath, exists: hasAi }, society: { path: societyPath, exists: hasSociety } },
     action: '',
     workflow: '',
@@ -145,9 +167,7 @@ async function runSentinel(env, overrides = {}) {
     result.action = 'generate';
     workflow = config.sourceWorkflow;
   } else {
-    const sourceCommit = await getSourceCommit(config);
     const deployment = await getLiveState(config, sourceCommit);
-    result.sourceCommit = sourceCommit;
     result.deployment = deployment;
     if (deployment.current) {
       result.skippedReason = 'source_and_live_deployment_current';
@@ -219,4 +239,4 @@ export default {
   },
 };
 
-export { getBeijingDateISO, runSentinel };
+export { fetchWithTimeout, getBeijingDateISO, runSentinel };

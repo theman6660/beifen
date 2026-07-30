@@ -27,12 +27,17 @@ jobs:
     outputs:
       date: ${{ steps.bj-date.outputs.date }}
       should_run: ${{ steps.guard.outputs.should_run }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@v6
-      - name: Sync latest source branch
+      - name: Pin latest source branch
+        id: source
         run: |
-          git fetch origin main
-          git checkout --detach origin/main
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          source_sha="$(git rev-parse refs/remotes/origin/main)"
+          git checkout --detach "$source_sha"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
       - name: Compute Beijing date once
         id: bj-date
         run: echo "date=$(TZ=Asia/Shanghai date +%F)" >> "$GITHUB_OUTPUT"
@@ -63,6 +68,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
       - uses: actions/setup-node@v6
         with: { node-version: '22', cache: npm }
       - run: npm ci
@@ -99,6 +106,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
       - uses: actions/setup-node@v6
         with: { node-version: '22', cache: npm }
       - run: npm ci
@@ -135,11 +144,26 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          ref: ${{ needs.preflight.outputs.source_sha }}
+      - name: Refuse artifacts generated from stale source
+        env:
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [ "$actual_sha" != "$SOURCE_SHA" ]; then
+            echo "::error::checkout resolved to $actual_sha instead of pinned source $SOURCE_SHA."
+            exit 1
+          fi
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          current_sha="$(git rev-parse refs/remotes/origin/main)"
+          if [ "$current_sha" != "$SOURCE_SHA" ]; then
+            echo "::error::origin/main advanced from $SOURCE_SHA to $current_sha; refusing stale generated artifacts."
+            exit 1
+          fi
       - uses: actions/setup-node@v6
         with: { node-version: '22', cache: npm }
       - run: npm ci
-      - name: Sync latest source branch
-        run: git pull --ff-only origin main
       - uses: actions/download-artifact@v8
         with: { name: ai-posts, path: source/_posts/ }
       - uses: actions/download-artifact@v8
