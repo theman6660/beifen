@@ -60,7 +60,11 @@ test('daily-report sentinel GitHub error handling', async (t) => {
   await t.test('aborts a hanging external request at the configured deadline', async () => {
     await assert.rejects(
       withMockFetch((url, options = {}) => new Promise((resolve, reject) => {
-        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+        const testDeadline = setTimeout(() => reject(new Error('timeout signal did not abort the request')), 100);
+        options.signal.addEventListener('abort', () => {
+          clearTimeout(testDeadline);
+          reject(options.signal.reason);
+        }, { once: true });
       }), () => fetchWithTimeout('https://api.example/hang', {}, 5)),
       error => error?.name === 'TimeoutError',
     );
