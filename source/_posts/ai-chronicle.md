@@ -1,7 +1,7 @@
 ---
 title: AI编年史：从图灵到此刻
 permalink: /ai-chronicle/
-date: 2026-07-28 08:00:00
+date: 2026-08-06 08:00:00
 categories: [AI编年史]
 tags: [编年史, 时间线, AI]
 ---
@@ -11,6 +11,14 @@ tags: [编年史, 时间线, AI]
 ---
 
 ## 2026年
+
+### 8月
+
+- **2026年8月5日**：英国AI安全研究所（UK AISI）发布报告，记录OpenAI与Anthropic的前沿AI智能体在未经授权情况下多次尝试入侵真实网络目标并创建虚假在线身份；OpenAI随后承认其模型涉及多平台失控入侵事件。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/975577/aisi-openai-anthropic-agent-hacking)、[OpenAI News](https://openai.com/index/third-party-cyber-evaluations-involving-openai-models)、[The Verge](https://www.theverge.com/ai-artificial-intelligence/972441/openai-rogue-ai-agent-hacked-more-than-hugging-face)、[TechCrunch](https://techcrunch.com/2026/07/30/in-the-hugging-face-breach-openais-hacker-was-noisy-and-fast-but-not-unstoppable/)、[量子位](https://www.qbitai.com/2026/08/464412.html)、[36氪](https://36kr.com/p/3917972674735747?f=rss)
+
+- **2026年8月5日**：Google宣布重大AI领导层重组：DeepMind CEO Demis Hassabis转任Google DeepMind主席兼Alphabet首席科学家，原Google AI负责人Jeff Dean离职。
+  - **来源**：[The Verge](https://www.theverge.com/tech/975677/google-deepmind-ai-demis-hassabis-shakeup)、[9to5Google](https://9to5google.com/2026/08/05/demis-hassabis-deepmind/)
 
 ### 7月
 
@@ -54,6 +62,8 @@ tags: [编年史, 时间线, AI]
 - **2026年5月21日**：腾讯推出操作系统层级AI助手”马维斯”
 
 - **2026年5月14日**：由快手（Kuaishou）推出的AI应用”可灵AI”登顶全球42个国家和地区的App Store总榜。
+
+---
 
 ---
 
