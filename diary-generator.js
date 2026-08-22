@@ -149,7 +149,7 @@ ${snippetsText}
 
   console.log('[生成] 正在生成日记...');
   const response = await getClient().chat.completions.create({
-    model: process.env.MODEL || 'gemini-2.0-flash',
+    model: process.env.MODEL || 'gemini-3.6-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1500,

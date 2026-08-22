@@ -63,7 +63,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           BASE_URL: ${{ vars.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/' }}
-          MODEL: ${{ vars.MODEL || 'gemini-2.0-flash' }}
+          MODEL: ${{ vars.MODEL || 'gemini-3.6-flash' }}
           DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
           FORCE_RUN: ${{ inputs.force || 'false' }}
         run: |
