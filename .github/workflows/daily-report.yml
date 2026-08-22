@@ -79,7 +79,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           BASE_URL: ${{ vars.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/' }}
-          MODEL: ${{ vars.MODEL || 'gemini-3.6-flash' }}
+          MODEL: ${{ vars.MODEL || 'gemini-2.5-flash' }}
           BJ_DATE: ${{ needs.preflight.outputs.date }}
           FORCE_RUN: ${{ inputs.force || 'false' }}
           CHRONICLE_ENTRY_FILE: .local-artifacts/ai-chronicle-entry.md
@@ -118,7 +118,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           DEEPSEEK_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
           BASE_URL: ${{ vars.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/' }}
-          MODEL: ${{ vars.MODEL || 'gemini-3.6-flash' }}
+          MODEL: ${{ vars.MODEL || 'gemini-2.5-flash' }}
           RSSHUB_URL: ${{ secrets.RSSHUB_URL }}
           BJ_DATE: ${{ needs.preflight.outputs.date }}
           FORCE_RUN: ${{ inputs.force || 'false' }}

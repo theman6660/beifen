@@ -1,7 +1,7 @@
 ---
 title: AI编年史：从图灵到此刻
 permalink: /ai-chronicle/
-date: 2026-08-08 08:00:00
+date: 2026-08-15 08:00:00
 categories: [AI编年史]
 tags: [编年史, 时间线, AI]
 ---
@@ -13,6 +13,12 @@ tags: [编年史, 时间线, AI]
 ## 2026年
 
 ### 8月
+
+- **2026年8月18日**：OpenAI宣布放缓部分前沿模型开发节奏，进行为期两周的强化安全与对齐检查。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/982323/openai-hit-brakes-voluntary-pacing-ai)、[OpenAI News](https://openai.com/index/pacing-model-development-cyber-capabilities)
+
+- **2026年8月14日**：Anthropic 官方发布并实施了 Claude 文本水印技术，引发业界对大模型输出内容追踪机制及其实际效果的广泛讨论。
+  - **来源**：[Anthropic Official](https://www.anthropic.com/news/claude-text-watermark)、[9to5Google](https://9to5google.com/2026/08/18/inbox-newsletter-11/)、[Stratechery](https://stratechery.com/2026/anthropics-watermarking-how-it-probably-works-worse-than-it-seems/)
 
 - **2026年8月7日**：OpenAI宣布暂停下一代模型Astra的内部开发与部署，原因是该模型在评估中达到关键网络安全能力阈值，可独立识别并实施对真实系统的网络攻击。
   - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/976948/openai-astra-model-pause-critical-cyber-capabilities)、[36氪](https://36kr.com/newsflashes/3930172274851205?f=rss)、[TechCrunch](https://techcrunch.com/2026/08/07/openai-says-it-slowed-astra-model-development-over-security-concerns/)、[OpenAI News](https://openai.com/index/responding-next-frontier-critical-cyber-capabilities)

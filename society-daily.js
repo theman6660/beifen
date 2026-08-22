@@ -33,11 +33,19 @@ if (PROXY_URL) {
 
 const API_KEY = (process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
 const BASE_URL = (process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/').trim();
-const MODEL = (process.env.MODEL || 'gemini-3.6-flash').trim();
+const MODEL = (process.env.MODEL || 'gemini-3.5-flash-lite').trim();
 const MAX_REPORT_TOKENS = Number.parseInt(process.env.MAX_TOKENS || '8000', 10) || 8000;
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
-const PROMPT_NEWS_LIMIT = 40;
-const PROMPT_SNIPPET_CHARS = 500;
+const PROMPT_NEWS_LIMIT = 30;
+const PROMPT_SNIPPET_CHARS = 300;
+
+const MODEL_CANDIDATES = [
+  MODEL,
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-flash-latest',
+  'gemini-2.5-flash',
+].filter((m, i, arr) => m && arr.indexOf(m) === i);
 
 let client;
 
@@ -60,6 +68,29 @@ function getClient() {
   }
 
   return client;
+}
+
+async function callChatCompletion(params) {
+  let lastError;
+  for (const modelName of MODEL_CANDIDATES) {
+    try {
+      return await getClient().chat.completions.create({
+        ...params,
+        model: modelName,
+      });
+    } catch (err) {
+      lastError = err;
+      const status = Number(err?.status || err?.statusCode || 0);
+      const is429 = status === 429 || (err?.message && (err.message.includes('429') || err.message.includes('quota')));
+      if (is429 && modelName !== MODEL_CANDIDATES[MODEL_CANDIDATES.length - 1]) {
+        console.log(`[LLM] 模型 ${modelName} 遇到频控或配额限制，自动切换至备用模型...`);
+        await wait(2000);
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
 }
 
 const parser = new RSSParser({
@@ -355,7 +386,7 @@ async function fetchNews(targetDate) {
 }
 
 // ============ 生成日报 ============
-async function generateReport(newsItems) {
+async function generateReport(newsItems, retryFeedback = '') {
   const MAX_NEWS = PROMPT_NEWS_LIMIT;
   const truncated = newsItems.length > MAX_NEWS;
   if (truncated) {
@@ -366,7 +397,7 @@ async function generateReport(newsItems) {
     `${i + 1}. [${item.source}] ${item.title}\n   重要性线索: ${item._priorityReason || '材料覆盖'}\n   链接: ${item.link}\n   摘要: ${(item.snippet || '').slice(0, PROMPT_SNIPPET_CHARS)}`
   ).join('\n\n');
 
-  const prompt = `你是一位兼具社会学家和精神分析师视角的信息观察者。你的任务是从近期新闻中，广泛捕捉这个时代的集体心理、社会关系和精神世界。
+  let prompt = `你是一位兼具社会学家和精神分析师视角的信息观察者。你的任务是从近期新闻中，广泛捕捉这个时代的集体心理、社会关系和精神世界。
 
 是透过事件看到人心的人。
 
@@ -423,9 +454,12 @@ ${newsText}
 11. 不要编造来源；不要输出参考来源列表，脚本会自动追加
 12. 直接输出文章内容，不要加markdown代码块标记`;
 
+  if (retryFeedback) {
+    prompt += `\n\n【重要提示！上一次生成未通过质检审查，原因如下，请在本次生成中务必严格规避并针对性修正】：\n${retryFeedback}`;
+  }
+
   console.log('[生成] 调用LLM生成社会思想日报...');
-  const response = await getClient().chat.completions.create({
-    model: MODEL,
+  const response = await callChatCompletion({
     temperature: 0.2,
     max_tokens: MAX_REPORT_TOKENS,
     messages: [{ role: 'user', content: prompt }],
@@ -451,28 +485,35 @@ async function checkQuality(report, dateStrCN) {
 4. 是否覆盖多个社会心理方向，而不是只围绕1-2条材料展开？
 5. 是否避免了政治、国际关系、军事、外交内容？
 6. 是否避免了参考来源列表、markdown代码块和 --- 分割线？
-7. 是否避免同一新闻事实在"关系透视""心理地貌""生活现场""时代精神""时代回响"之间反复重述？如果同一事件只是换句话重复出现，应 FAIL。
+7. 今日关键词与今日信号作为概览可以提及核心事实；但正文各分析板块（"关系透视""心理地貌""生活现场""时代精神""时代回响"）之间不得相互换句话反复重述同一事实。如果正文分析板块之间有明显重复，应 FAIL。
 8. 字数长短、分析深度不作为失败理由；只在结构明显缺失、信息覆盖明显过窄、重复明显或明显跑题时 FAIL。
 
 文章内容：
 ${report.slice(0, 4000)}`;
 
-  try {
-    console.log('[质检] 评估生成质量...');
-    const response = await getClient().chat.completions.create({
-      model: MODEL,
-      temperature: 0.0,
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: checkPrompt }],
-    });
+  for (let attempt = 0; attempt <= 2; attempt++) {
+    try {
+      console.log('[质检] 评估生成质量...');
+      const response = await callChatCompletion({
+        temperature: 0.0,
+        max_tokens: 2000,
+        messages: [{ role: 'user', content: checkPrompt }],
+      });
 
-    const choice = response?.choices?.[0];
-    const result = choice?.message?.content?.trim() || '';
-    console.log(`[质检] finish_reason=${choice?.finish_reason || 'unknown'}，结果: ${result}`);
-    return interpretQualityResponse(result);
-  } catch (err) {
-    console.log(`[质检] 评估失败，拒绝放行: ${err.message}`);
-    return { pass: false, reason: `质检异常: ${err.message}` };
+      const choice = response?.choices?.[0];
+      const result = choice?.message?.content?.trim() || '';
+      console.log(`[质检] finish_reason=${choice?.finish_reason || 'unknown'}，结果: ${result}`);
+      return interpretQualityResponse(result);
+    } catch (err) {
+      if (attempt < 2 && isTransientLLMError(err)) {
+        const delayMs = 15000 * (attempt + 1);
+        console.log(`[质检] 调用遇到波动（${formatErrorMessage(err)}），${delayMs / 1000}秒后重试质检...`);
+        await wait(delayMs);
+        continue;
+      }
+      console.log(`[质检] 评估失败，拒绝放行: ${err.message}`);
+      return { pass: false, reason: `质检异常: ${err.message}` };
+    }
   }
 }
 
@@ -601,17 +642,18 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
+async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 3) {
+  let lastFailureReason = '';
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
     let report = '';
     try {
-      report = await generateReport(promptNewsItems);
+      report = await generateReport(promptNewsItems, lastFailureReason);
     } catch (err) {
       const message = formatErrorMessage(err);
       if (attempt < maxRetries && isTransientLLMError(err)) {
-        const delayMs = Math.min(30000, 5000 * 2 ** attempt);
+        const delayMs = Math.min(60000, 15000 * 2 ** attempt);
         console.log(`[生成] LLM调用失败（${message}），${Math.round(delayMs / 1000)}秒后重试...`);
         await wait(delayMs);
         continue;
@@ -626,6 +668,7 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
       continue;
     }
 
+    await wait(6000);
     const { pass, reason } = await checkQuality(report, dateStrCN);
 
     if (pass) {
@@ -633,6 +676,7 @@ async function generateWithRetry(promptNewsItems, dateStrCN, maxRetries = 2) {
       return report;
     }
 
+    lastFailureReason = reason;
     console.log(`[质检] 未通过: ${reason}`);
   }
 
