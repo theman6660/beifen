@@ -674,6 +674,7 @@ ${newsText}
   console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await getClient().chat.completions.create({
     model: MODEL,
+    temperature: 0.2,
     max_tokens: MAX_REPORT_TOKENS,
     messages: [{ role: 'user', content: prompt }],
   });
@@ -715,6 +716,7 @@ ${report.slice(0, 4000)}`;
     console.log('[质检] 评估生成质量...');
     const response = await getClient().chat.completions.create({
       model: MODEL,
+      temperature: 0.0,
       max_tokens: 2000,
       messages: [{ role: 'user', content: checkPrompt }],
     });
@@ -835,7 +837,7 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function generateWithRetry(promptNewsItems, maxRetries = 2) {
+async function generateWithRetry(promptNewsItems, maxRetries = 3) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) console.log(`\n[重试] 第 ${attempt} 次重新生成...`);
 
