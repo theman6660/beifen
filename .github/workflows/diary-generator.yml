@@ -59,9 +59,12 @@ jobs:
       - name: Generate diary from private input
         if: steps.input.outputs.available == 'true'
         env:
-          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          AUTH_TOKEN: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
+          DEEPSEEK_API_KEY: ${{ secrets.GEMINI_API_KEY || secrets.DEEPSEEK_API_KEY || secrets.AUTH_TOKEN }}
+          BASE_URL: ${{ vars.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/' }}
+          MODEL: ${{ vars.MODEL || 'gemini-2.0-flash' }}
           DIARY_SNIPPETS_JSON: ${{ secrets.DIARY_SNIPPETS_JSON }}
-          MODEL: deepseek-v4-pro
           FORCE_RUN: ${{ inputs.force || 'false' }}
         run: |
           args=()

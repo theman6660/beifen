@@ -46,9 +46,10 @@ if (PROXY_URL) {
   }
 }
 
-const API_KEY = (process.env.AUTH_TOKEN || process.env.DEEPSEEK_API_KEY || '').trim();
-const BASE_URL = (process.env.BASE_URL || 'https://api.deepseek.com').trim();
-const MODEL = (process.env.MODEL || 'deepseek-v4-pro').trim();
+const API_KEY = (process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
+const BASE_URL = (process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/').trim();
+const MODEL = (process.env.MODEL || 'gemini-2.0-flash').trim();
+const MAX_REPORT_TOKENS = Number.parseInt(process.env.MAX_TOKENS || '8192', 10) || 8192;
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
 const PROMPT_NEWS_LIMIT = 40;
 const PROMPT_SNIPPET_CHARS = 500;
@@ -59,7 +60,7 @@ let client;
 
 function getClient() {
   if (!API_KEY) {
-    console.error('错误: 环境变量 AUTH_TOKEN 或 DEEPSEEK_API_KEY 未设置');
+    console.error('错误: 环境变量 AUTH_TOKEN, GEMINI_API_KEY 或 DEEPSEEK_API_KEY 未设置');
     process.exit(1);
   }
 
@@ -672,7 +673,7 @@ ${newsText}
   console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await getClient().chat.completions.create({
     model: MODEL,
-    max_tokens: 9000,
+    max_tokens: MAX_REPORT_TOKENS,
     messages: [{ role: 'user', content: prompt }],
   });
 

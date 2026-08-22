@@ -13,11 +13,11 @@ const POSTS_DIR = path.join(HEXO_DIR, 'source', '_posts');
 let client;
 
 function getClient() {
-  const apiKey = (process.env.DEEPSEEK_API_KEY || '').trim();
-  if (!apiKey) throw new Error('DEEPSEEK_API_KEY 未设置');
+  const apiKey = (process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
+  if (!apiKey) throw new Error('AUTH_TOKEN / GEMINI_API_KEY / DEEPSEEK_API_KEY 未设置');
   if (!client) {
     client = new OpenAI({
-      baseURL: (process.env.BASE_URL || 'https://api.deepseek.com').trim(),
+      baseURL: (process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/').trim(),
       apiKey,
       timeout: 60000,
       maxRetries: 2,
@@ -147,9 +147,9 @@ ${snippetsText}
 
 直接写日记正文。`;
 
-  console.log('[DeepSeek] 正在生成日记...');
+  console.log('[生成] 正在生成日记...');
   const response = await getClient().chat.completions.create({
-    model: process.env.MODEL || 'deepseek-v4-pro',
+    model: process.env.MODEL || 'gemini-2.0-flash',
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1500,
