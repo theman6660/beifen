@@ -45,7 +45,7 @@ jobs:
           fi
 
           echo "::notice::No DIARY_SNIPPETS_JSON secret is configured; skipping the scheduled diary run."
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: steps.input.outputs.available == 'true'
         with: { fetch-depth: 0 }
       - uses: actions/setup-node@v6
