@@ -441,7 +441,7 @@ async function checkQuality(report, dateStrCN) {
     return localResult;
   }
 
-  const checkPrompt = `评估以下社会思想日报的质量。只需回复"PASS"或"FAIL: <原因>"。
+  const checkPrompt = `评估以下社会思想日报的质量。必须在第一行直接输出判定结果："PASS" 或 "FAIL: <原因>"。
 
 检查标准：
 1. 是否有"今日关键词"板块？是否包含至少4个关键词？
@@ -460,7 +460,7 @@ ${report.slice(0, 4000)}`;
     console.log('[质检] 评估生成质量...');
     const response = await getClient().chat.completions.create({
       model: MODEL,
-      max_tokens: 1200,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: checkPrompt }],
     });
 

@@ -668,7 +668,8 @@ ${newsText}
    - 如果某个分类板块没有足够未重复材料，可以缩短或跳过，不要为了凑板块复述。
 8. 不要编造来源；不要输出参考来源列表，脚本会自动追加
 9. 严格按每条素材的"发布日期"判断时效；不得把历史发布写成今日、近日、一周内发生，不得自行推断未在素材中出现的发布时间或发布顺序
-10. 直接输出文章内容，不要加markdown代码块标记`;
+10. 严格基于提供的【素材列表】进行事实归纳，严禁虚构或编造未在素材中出现的公司发布、模型上线或新闻事实
+11. 直接输出文章内容，不要加markdown代码块标记`;
 
   console.log('[生成] 调用LLM生成AI行业日报...');
   const response = await getClient().chat.completions.create({
@@ -693,7 +694,7 @@ async function checkQuality(report, newsItems) {
     `日期: ${item.date || '未知'}`,
     `摘要: ${(item.snippet || '').slice(0, 220)}`,
   ].join(' | ')).join('\n');
-  const checkPrompt = `评估以下AI行业日报的质量。只需回复"PASS"或"FAIL: <原因>"。
+  const checkPrompt = `评估以下AI行业日报的质量。必须在第一行直接输出判定结果："PASS" 或 "FAIL: <原因>"。
 
 检查标准：
 1. 是否有"今日速览"板块？速览是否包含至少5条要点？
@@ -714,7 +715,7 @@ ${report.slice(0, 4000)}`;
     console.log('[质检] 评估生成质量...');
     const response = await getClient().chat.completions.create({
       model: MODEL,
-      max_tokens: 1200,
+      max_tokens: 2000,
       messages: [{ role: 'user', content: checkPrompt }],
     });
 
