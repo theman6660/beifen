@@ -1,6 +1,4 @@
 require('dotenv').config();
-const OpenAI = require('openai');
-const { HttpsProxyAgent } = require('https-proxy-agent');
 const RSSParser = require('rss-parser');
 const fs = require('fs');
 const path = require('path');
@@ -34,81 +32,19 @@ const {
   interpretQualityResponse,
   isPublishedWithin,
 } = require('./lib/daily-report-quality');
+const {
+  callChatCompletion,
+  proxyAgent,
+  wait,
+} = require('./lib/llm-client');
 
 // ============ 配置 ============
-const PROXY_URL = (process.env.PROXY_URL || '').trim();
-let proxyAgent;
-if (PROXY_URL) {
-  try {
-    proxyAgent = new HttpsProxyAgent(PROXY_URL);
-  } catch (err) {
-    console.error(`[配置] 代理 URL 无效，将跳过代理: ${err.message}`);
-  }
-}
-
-const API_KEY = (process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
-const BASE_URL = (process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/').trim();
-const MODEL = (process.env.MODEL || 'gemini-3.5-flash-lite').trim();
 const MAX_REPORT_TOKENS = Number.parseInt(process.env.MAX_TOKENS || '8192', 10) || 8192;
 const RSS_TIMEOUT_MS = Number.parseInt(process.env.RSS_TIMEOUT_MS || '12000', 10) || 12000;
 const PROMPT_NEWS_LIMIT = 30;
 const PROMPT_SNIPPET_CHARS = 300;
 const CHRONICLE_NEWS_LIMIT = 50;
 const CHRONICLE_LOOKBACK_DAYS = 7;
-
-const MODEL_CANDIDATES = [
-  MODEL,
-  'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-flash-latest',
-  'gemini-2.5-flash',
-].filter((m, i, arr) => m && arr.indexOf(m) === i);
-
-let client;
-
-function getClient() {
-  if (!API_KEY) {
-    console.error('错误: 环境变量 AUTH_TOKEN, GEMINI_API_KEY 或 DEEPSEEK_API_KEY 未设置');
-    process.exit(1);
-  }
-
-  if (!client) {
-    client = new OpenAI({
-      apiKey: API_KEY,
-      baseURL: BASE_URL,
-      timeout: 180000,
-      maxRetries: 2,
-      defaultHeaders: {
-        'Accept-Encoding': 'identity',
-      },
-    });
-  }
-
-  return client;
-}
-
-async function callChatCompletion(params) {
-  let lastError;
-  for (const modelName of MODEL_CANDIDATES) {
-    try {
-      return await getClient().chat.completions.create({
-        ...params,
-        model: modelName,
-      });
-    } catch (err) {
-      lastError = err;
-      const status = Number(err?.status || err?.statusCode || 0);
-      const is429 = status === 429 || (err?.message && (err.message.includes('429') || err.message.includes('quota')));
-      if (is429 && modelName !== MODEL_CANDIDATES[MODEL_CANDIDATES.length - 1]) {
-        console.log(`[LLM] 模型 ${modelName} 遇到频控或配额限制，自动切换至备用模型...`);
-        await wait(2000);
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastError;
-}
 
 const parser = new RSSParser({
   requestOptions: proxyAgent ? { agent: proxyAgent } : {},
@@ -872,10 +808,6 @@ function isTransientLLMError(err) {
     'timeout',
     'temporarily unavailable',
   ].some(token => message.includes(token));
-}
-
-function wait(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function generateWithRetry(promptNewsItems, maxRetries = 3) {

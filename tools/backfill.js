@@ -1,14 +1,12 @@
+'use strict';
+
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 const MISSING_DATES = [
-  '2026-08-20',
-  '2026-08-19',
-  '2026-08-17',
-  '2026-08-16',
-  '2026-08-15',
-  '2026-08-14',
+  '2026-08-23',
+  '2026-08-24',
 ];
 
 const HEXO_POSTS_DIR = path.join(__dirname, '..', 'source', '_posts');
@@ -26,10 +24,6 @@ function runScript(scriptName, date) {
     const env = {
       ...process.env,
       BJ_DATE: date,
-      PROXY_URL: process.env.PROXY_URL || 'http://127.0.0.1:7892',
-      AUTH_TOKEN: process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || '',
-      BASE_URL: process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/',
-      MODEL: process.env.MODEL || 'gemini-3.5-flash-lite',
     };
 
     const child = spawn('node', [scriptName, '--no-deploy'], {
@@ -63,16 +57,16 @@ async function main() {
 
     if (!fs.existsSync(aiFile)) {
       await runScript('ai-daily.js', date);
-      console.log('[冷却] 避免触发 15 RPM 频率限制，等待 18 秒...');
-      await sleep(18000);
+      console.log('[冷却] 等待 10 秒...');
+      await sleep(10000);
     } else {
       console.log(`[跳过] ${aiFile} 已存在`);
     }
 
     if (!fs.existsSync(societyFile)) {
       await runScript('society-daily.js', date);
-      console.log('[冷却] 避免触发 15 RPM 频率限制，等待 18 秒...');
-      await sleep(18000);
+      console.log('[冷却] 等待 10 秒...');
+      await sleep(10000);
     } else {
       console.log(`[跳过] ${societyFile} 已存在`);
     }

@@ -3,28 +3,13 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const OpenAI = require('openai');
 const { beijingDateISO } = require('./lib/date-utils');
 const { sanitizeGeneratedMarkdown } = require('./lib/markdown-safety');
+const { callChatCompletion } = require('./lib/llm-client');
 
 const HEXO_DIR = __dirname;
 const PRIVATE_SNIPPETS_DIR = path.join(HEXO_DIR, '.local-artifacts', 'private-snippets');
 const POSTS_DIR = path.join(HEXO_DIR, 'source', '_posts');
-let client;
-
-function getClient() {
-  const apiKey = (process.env.AUTH_TOKEN || process.env.GEMINI_API_KEY || process.env.DEEPSEEK_API_KEY || '').trim();
-  if (!apiKey) throw new Error('AUTH_TOKEN / GEMINI_API_KEY / DEEPSEEK_API_KEY 未设置');
-  if (!client) {
-    client = new OpenAI({
-      baseURL: (process.env.BASE_URL || 'https://generativelanguage.googleapis.com/v1beta/openai/').trim(),
-      apiKey,
-      timeout: 60000,
-      maxRetries: 2,
-    });
-  }
-  return client;
-}
 
 function getDateStrCN(dateStr) {
   validateDateStr(dateStr);
@@ -148,8 +133,7 @@ ${snippetsText}
 直接写日记正文。`;
 
   console.log('[生成] 正在生成日记...');
-  const response = await getClient().chat.completions.create({
-    model: process.env.MODEL || 'gemini-2.5-flash',
+  const response = await callChatCompletion({
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.3,
     max_tokens: 1500,
