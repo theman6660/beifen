@@ -14,6 +14,12 @@ tags: [编年史, 时间线, AI]
 
 ### 8月
 
+- **2026年8月23日**：DeepMind校友创办的英国AI实验室Inherent发布科研复现Agent Faraday，在文献实验逻辑拆解与代码复现评估中超越主流通用前沿模型。
+  - **来源**：[TechCrunch](https://techcrunch.com/2026/08/22/inherent-founded-by-deepmind-alumni-says-its-ai-teammate-just-outperformed-anthropic-and-openai-at-replicating-research/)
+
+- **2026年8月22日**：Anthropic 将具备前沿漏洞挖掘能力的 Claude Mythos 5 接入 Claude Security 企业安全公测版，采取结构化无自然语言 Prompt 的产品封装策略以防模型被恶意操纵。
+  - **来源**：[MarkTechPost](https://www.marktechpost.com/2026/08/21/anthropic-brings-claude-mythos-5-to-claude-security/)
+
 - **2026年8月18日**：OpenAI宣布放缓部分前沿模型开发节奏，进行为期两周的强化安全与对齐检查。
   - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/982323/openai-hit-brakes-voluntary-pacing-ai)、[OpenAI News](https://openai.com/index/pacing-model-development-cyber-capabilities)
 
