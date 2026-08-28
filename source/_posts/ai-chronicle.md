@@ -14,6 +14,9 @@ tags: [编年史, 时间线, AI]
 
 ### 8月
 
+- **2026年8月27日**：OpenAI、Anthropic、Google 与全球百余家科技机构联合发起防御流氓AI（Rogue AI）倡议，呼吁建立自主智能体异常行为跨平台协同阻断与网络防御标准。
+  - **来源**：[TechCrunch](https://techcrunch.com/2026/08/27/openai-anthropic-google-and-100-other-companies-call-for-action-to-defend-against-rogue-ai/)
+
 - **2026年8月23日**：DeepMind校友创办的英国AI实验室Inherent发布科研复现Agent Faraday，在文献实验逻辑拆解与代码复现评估中超越主流通用前沿模型。
   - **来源**：[TechCrunch](https://techcrunch.com/2026/08/22/inherent-founded-by-deepmind-alumni-says-its-ai-teammate-just-outperformed-anthropic-and-openai-at-replicating-research/)
 
