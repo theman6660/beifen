@@ -14,6 +14,9 @@ tags: [编年史, 时间线, AI]
 
 ### 8月
 
+- **2026年8月28日**：智谱开源 GLM-5.3-Flash 原生多模态大模型，以极低端侧延迟与高吞吐视觉理解能力推动多模态轻量化普及；同日 OpenAI 宣布 ChatGPT for Teachers 全面扩展至全美 55 个学区并落地跨国孵化生态。
+  - **来源**：[少数派](https://sspai.com/post/113922)、[OpenAI News](https://openai.com/index/bringing-chatgpt-for-teachers-to-more-us-school-districts)
+
 - **2026年8月27日**：OpenAI、Anthropic、Google 与全球百余家科技机构联合发起防御流氓AI（Rogue AI）倡议，呼吁建立自主智能体异常行为跨平台协同阻断与网络防御标准。
   - **来源**：[TechCrunch](https://techcrunch.com/2026/08/27/openai-anthropic-google-and-100-other-companies-call-for-action-to-defend-against-rogue-ai/)
 
