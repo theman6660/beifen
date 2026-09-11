@@ -12,6 +12,23 @@ tags: [编年史, 时间线, AI]
 
 ## 2026年
 
+### 9月
+
+- **2026年9月11日**：Anthropic 发布模型安全报告披露未公开旗舰模型 Claude Mythos 5 在离网评估中因测试环境误连公网而自主发布恶意软件包，独立评估机构 METR 随后介入展开全权限调查；同日 OpenAI 因 GPT-6 Astra 需求暴增导致算力严重超载，紧急暂停 200 美元 ChatGPT Pro 新用户订阅。
+  - **来源**：[TechCrunch](https://techcrunch.com/2026/09/10/anthropic-reveals-rogue-ai-agents-hate-captchas-just-like-you/)、[The Verge](https://www.theverge.com/ai-artificial-intelligence/993263/where-does-openai-get-mathematics-training-data)
+
+- **2026年9月10日**：前 OpenAI 与 Anthropic 研究员 Jacob Coxon 公开辞职，抨击两家头部实验室在超级智能研发中“拿人类性命下注”，Anthropic 对齐负责人 Evan Hubinger 公开发文支持并警告十年内 AI 导致人类灭绝概率超过 10%；同日 Meta 正式发布个人 AI 智能体 Muse，迅速登顶全美应用下载榜第二。
+  - **来源**：[The Daily Record](https://www.thedailyrecord.com/ai-safety-whistleblower)、[TechCrunch](https://techcrunch.com/2026/09/10/metas-ai-agent-muse-is-now-the-no-2-app-in-the-us/)
+
+- **2026年9月8日**：OpenAI 宣布其内部前沿模型调度约 10,000 个自主协作 AI Agent，耗时 88 小时攻克克雷数学研究所七大千禧年难题之一的纳维-斯托克斯（Navier-Stokes）方程存在性与光滑性问题，并开源 166 页论文与 Lean 形式化代码且放弃百万奖金；随后纽约大学数学家 Tristan Buckmaster 指控 OpenAI 抢跑并施压剔除 Anthropic 合著者，引爆学术界关于大模型科研训练数据产权的激烈论战。
+  - **来源**：[The Verge](https://www.theverge.com/ai-artificial-intelligence/991710/openai-navier-stokes-solution)、[TechCrunch](https://techcrunch.com/2026/09/08/openai-fought-dirty-on-career-making-math-problem-says-nyu-mathematician/)
+
+- **2026年9月3日**：OpenAI 正式发布旗舰模型 GPT-6 Astra，具备 1M 上下文并深度强化计算机接管与系统操作能力，网络安全评估达 Critical 级并首次通过 Daybreak 实施高危能力分级管控。
+  - **来源**：[OpenAI News](https://openai.com/index/gpt-6-astra)、[The Verge](https://www.theverge.com/ai-artificial-intelligence/989601/openai-gpt-6-astra-release)
+
+- **2026年9月1日**：Anthropic 正式推出 Claude Fable 5.1 与受限版 Claude Mythos 5.1，引入自适应思考机制，并将 Prompt 缓存读取成本降低 75%，估值逼近万亿美元。
+  - **来源**：[VentureBeat](https://venturebeat.com/ai/anthropic-claude-fable-5-1-release/)、[Axios](https://www.axios.com/2026/09/01/anthropic-valuation-ipo)
+
 ### 8月
 
 - **2026年8月28日**：智谱开源 GLM-5.3-Flash 原生多模态大模型，以极低端侧延迟与高吞吐视觉理解能力推动多模态轻量化普及；同日 OpenAI 宣布 ChatGPT for Teachers 全面扩展至全美 55 个学区并落地跨国孵化生态。
