@@ -17,7 +17,7 @@ jobs:
   check-and-dispatch:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Sync latest source branch
         run: |
           git fetch origin main
