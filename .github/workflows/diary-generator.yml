@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v6
         if: steps.input.outputs.available == 'true'
         with: { fetch-depth: 0 }
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         if: steps.input.outputs.available == 'true'
         with: { node-version: '22', cache: npm }
       - if: steps.input.outputs.available == 'true'
